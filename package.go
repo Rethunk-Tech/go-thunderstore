@@ -2,11 +2,12 @@ package thunderstore
 
 import (
 	"encoding/json"
-	"github.com/Rethunk-Tech/go-semverish"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Rethunk-Tech/go-semverish"
 )
 
 // Version is one published version of a package.
