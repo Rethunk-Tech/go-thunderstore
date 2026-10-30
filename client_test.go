@@ -222,3 +222,69 @@ func TestEachAndFindLeaveNoListingInMemory(t *testing.T) {
 		t.Fatal("a streamed read kept the whole listing in memory")
 	}
 }
+
+func TestStoredNeverTouchesTheNetwork(t *testing.T) {
+	f := newFake(t)
+	now := time.Now()
+	c := f.client(t, func(cfg *Config) { cfg.Now = func() time.Time { return now } })
+	count := func() (n int) {
+		ok, err := c.Stored(t.Context(), community, func(*Package) { n++ })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			return -1
+		}
+		return n
+	}
+	if got := count(); got != -1 || f.indexHits.Load() != 0 || f.chunkHit.Load() != 0 {
+		t.Fatalf("cold: n %d, index %d chunks %d", got, f.indexHits.Load(), f.chunkHit.Load())
+	}
+	if _, err := c.Stored(t.Context(), "Bad Key", func(*Package) {}); err == nil {
+		t.Fatal("a bad community key was accepted")
+	}
+
+	if _, err := c.ListingFile(t.Context(), community); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(3 * refreshAfter)
+	if got := count(); got != 3 {
+		t.Fatalf("stale: n %d", got)
+	}
+	c.Wait()
+	if f.indexHits.Load() != 1 || f.chunkHit.Load() != 2 {
+		t.Fatalf("a stale read reached out: index %d chunks %d", f.indexHits.Load(), f.chunkHit.Load())
+	}
+	if c.Held(community) {
+		t.Fatal("Stored kept the listing in memory")
+	}
+	if v, ok, err := c.StoredVersions(community, "Alice", "MoreCompany"); err != nil || !ok || !slices.Equal(v, []string{"2.0.0", "1.0.0"}) {
+		t.Fatalf("stored versions = %v %v %v", v, ok, err)
+	}
+	if _, ok, _ := c.StoredVersions(community, "Nobody", "Nothing"); ok {
+		t.Fatal("versions for a package the listing lacks")
+	}
+	c.Wait()
+	if f.indexHits.Load() != 1 {
+		t.Fatalf("StoredVersions reached out: %d", f.indexHits.Load())
+	}
+}
+
+func TestStoredUsesTheHeldListing(t *testing.T) {
+	f := newFake(t)
+	c := f.client(t, nil)
+	if c.Held(community) {
+		t.Fatal("held before anything read")
+	}
+	if _, err := c.Index(t.Context(), community); err != nil {
+		t.Fatal(err)
+	}
+	if !c.Held(community) {
+		t.Fatal("Index did not hold the listing")
+	}
+	var deps int
+	ok, err := c.Stored(t.Context(), community, func(p *Package) { deps += len(p.Dependencies(p.Versions[0])) })
+	if err != nil || !ok || deps != 3 {
+		t.Fatalf("held read: ok %v err %v deps %d (memory copy carries dependencies)", ok, err, deps)
+	}
+}

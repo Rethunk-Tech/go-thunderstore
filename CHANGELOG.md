@@ -6,6 +6,13 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Client.Stored` reads a community's listing without the network: the held index, else the stored file however old,
+  and `false` when nothing is stored. It never downloads, builds or starts a refresh.
+- `Client.StoredVersions` answers a package's versions under the same never-network rule.
+- `Client.Held` reports whether `Index` keeps the listing in memory.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

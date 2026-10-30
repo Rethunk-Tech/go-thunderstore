@@ -60,6 +60,9 @@ func main() {
 | `Client.Index`, `Each`, `Find`, `Versions` | A stored listing answers at once however old; past an hour a rebuild runs behind it; only a community with nothing stored waits on the download |
 | `Client.Index` | Holds the listing in memory until unused for ten minutes; one package per case-folded id |
 | `Client.Each`, `Find`, `EachStored` | Read a package at a time; `Package.Dependencies` is empty; `Each` and `EachStored` may give a case-folded twin twice, `Package.Outranks` picks |
+| `Client.Stored` | Never downloads, builds or starts a refresh, however stale the stored listing: memory copy (with `Dependencies`) if held, else a stored file read a package at a time (without); `false` when nothing is stored |
+| `Client.StoredVersions` | `Versions` from the side file or stored listing under the same never-network rule; writes nothing; `false` when not stored or not listed |
+| `Client.Held` | Whether `Index` holds the community's listing in memory; `Stored` and `Each` on a disk read leave it `false` |
 | `Client.Snapshot` | The held index if there is one, else a fresh read the client does not keep |
 | `Config.Refreshed` | Called with the community after a background refresh stored a changed listing, never for an unchanged one |
 | `Config.Built` | Called with the community and listing path after each new listing is stored |

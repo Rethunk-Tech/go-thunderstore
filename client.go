@@ -181,6 +181,47 @@ func (c *Client) ListingFile(ctx context.Context, community string) (string, err
 	return c.buildListing(ctx, community)
 }
 
+// Stored calls fn with each package of the community's listing without touching the network: from memory when Index
+// holds it, else a package at a time from the stored file, however old it is. It reports false, having called nothing,
+// when the community has no listing stored. It never downloads, builds or starts a refresh. Packages from memory carry
+// Dependencies; those read from the file do not, and a case-folded twin may come twice, as with Each.
+func (c *Client) Stored(_ context.Context, community string, fn func(*Package)) (bool, error) {
+	if !communityKey.MatchString(community) {
+		return false, fmt.Errorf("%q is not a Thunderstore community key", community)
+	}
+	c.mu.Lock()
+	m, held := c.memo[community]
+	c.mu.Unlock()
+	if held {
+		m.idx.Each(fn)
+		return true, nil
+	}
+	path, ok := c.storedPath(community)
+	if !ok {
+		return false, nil
+	}
+	return true, EachStored(path, fn)
+}
+
+// Held reports whether Index holds the community's listing in memory.
+func (c *Client) Held(community string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.memo[community]
+	return ok
+}
+
+// storedPath is the community's stored listing file, if there is one.
+func (c *Client) storedPath(community string) (string, bool) {
+	if !communityKey.MatchString(community) {
+		return "", false
+	}
+	meta := c.readMeta(community)
+	path := listingPath(c.dir(), community, meta.Hash)
+	_, err := os.Stat(path)
+	return path, meta.Hash != "" && err == nil
+}
+
 // cacheMeta records which index blob the stored listing was built from.
 type cacheMeta struct {
 	Hash    string    `json:"hash"`

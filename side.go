@@ -58,6 +58,18 @@ func (c *Client) Versions(ctx context.Context, community, owner, name string) ([
 }
 
 func (c *Client) sideVersions(ctx context.Context, community, owner, name string) ([]string, bool) {
+	v, ok := c.storedSide(community, owner, name)
+	if !ok {
+		return nil, false
+	}
+	if c.now().Sub(c.readMeta(community).Fetched) >= refreshAfter {
+		c.refreshInBackground(ctx, community)
+	}
+	return v, true
+}
+
+// storedSide is the side file's list for the package when it was read from the stored index.
+func (c *Client) storedSide(community, owner, name string) ([]string, bool) {
 	if !communityKey.MatchString(community) {
 		return nil, false
 	}
@@ -72,10 +84,25 @@ func (c *Client) sideVersions(ctx context.Context, community, owner, name string
 	if !ok || s.Hash != meta.Hash || len(v) == 0 {
 		return nil, false
 	}
-	if c.now().Sub(meta.Fetched) >= refreshAfter {
-		c.refreshInBackground(ctx, community)
-	}
 	return slices.Clone(v), true
+}
+
+// StoredVersions is Versions without the network: the package's version numbers from the side file or the stored
+// listing, however old, and false when the community has nothing stored or the package is not in it. It never
+// downloads, builds or starts a refresh, and writes nothing.
+func (c *Client) StoredVersions(community, owner, name string) ([]string, bool, error) {
+	if v, ok := c.storedSide(community, owner, name); ok {
+		return v, true, nil
+	}
+	path, ok := c.storedPath(community)
+	if !ok {
+		return nil, false, nil
+	}
+	p, ok, err := findStored(path, owner, name)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	return p.VersionNumbers(), true, nil
 }
 
 // rememberVersions adds one package's list, read from the listing the cache holds, to the side file.
