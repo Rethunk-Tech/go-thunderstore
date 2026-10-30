@@ -1,0 +1,23 @@
+name: Bug report
+description: The package returns a wrong result, an error it should not, or panics
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What the package did, and what you expected.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Commit or tag of this module, `go version`, and the OS.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: The smallest program or input that shows it.

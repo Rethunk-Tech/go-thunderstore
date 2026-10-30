@@ -1,0 +1,21 @@
+#!/bin/sh
+# Pin is 1.7.12 with a baked checksum. Never exec a PATH binary: version text
+# is not a checksum.
+set -eu
+VERSION=1.7.12
+SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+ARCHIVE="actionlint_${VERSION}_linux_amd64.tar.gz"
+URL="https://github.com/rhysd/actionlint/releases/download/v${VERSION}/${ARCHIVE}"
+
+cache="${XDG_CACHE_HOME:-${HOME}/.cache}/actionlint/${VERSION}"
+bin="$cache/actionlint"
+if [ ! -x "$bin" ]; then
+  mkdir -p "$cache"
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  curl -fsSL --max-time 60 --retry 5 --retry-all-errors -o "$tmp" "$URL"
+  echo "$SHA256  $tmp" | sha256sum -c -
+  tar -xzf "$tmp" -C "$cache" actionlint
+  chmod +x "$bin"
+fi
+exec "$bin" "$@"

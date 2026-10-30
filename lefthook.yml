@@ -1,0 +1,12 @@
+# pre-commit carries only what is imperceptible, so it never becomes the thing people reach for
+# --no-verify to escape. The full gate is pre-push, and it is the repository's one gate command
+# rather than a list restated here, so this file cannot drift from what `gate --list` shows.
+pre-commit:
+  jobs:
+    - name: gitleaks
+      run: gitleaks git --pre-commit --staged --redact --no-banner --log-level warn
+
+pre-push:
+  jobs:
+    - name: gate
+      run: gate

@@ -1,0 +1,5 @@
+# The gate's own binaries are named by the go.mod tool directive, so there is
+# nothing installed locally to ignore. Build and test artefacts:
+/bin/
+*.test
+coverage.out

@@ -1,0 +1,77 @@
+name: CI
+
+# The gate on every pull request and every push to main. There is no release workflow: this is a
+# library, and a release is a git tag that consumers require by version.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push makes the older run's verdict worthless, so it cancels that run rather than racing it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    # The same `gate` a contributor runs. A check that exists only in this file does not run locally.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: Rethunk-Tech/gh-actions/setup-go@67ec8bd68343d915462729ad119c355740cf6205 # v1.22
+        with:
+          go-version-file: go.mod
+
+      # Without this cache every pass re-checks every package. The key takes only the inputs
+      # that touch every package, and the prefix restore-key keeps a changed key from starting cold.
+      - name: Cache golangci-lint analysis
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}
+          restore-keys: golangci-lint-${{ runner.os }}-
+
+      # Pinned rather than floating: a gate release that changes detection must not change this
+      # repository's verdict without a commit here.
+      - name: Install gate
+        run: go install github.com/Rethunk-Tech/rethunk-gate-cli/cmd/gate@v0.6.9
+
+      - name: Gate
+        run: gate --timeout 15m
+
+  test:
+    runs-on: ubuntu-latest
+    # A test that never returns would otherwise hold a runner for the full six hours.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The race detector keeps a goroutine from becoming shared state unnoticed.
+      - name: Test
+        uses: Rethunk-Tech/gh-actions/setup-go@67ec8bd68343d915462729ad119c355740cf6205 # v1.22
+        with:
+          go-version-file: go.mod
+          run-test-race: "true"
+
+      # Each Fuzz target found in each package gets a short run, so a new target is covered without
+      # editing this file. Linux only: every other leg already replays the committed seeds as tests.
+      - name: Fuzz smoke
+        if: runner.os == 'Linux'
+        run: |
+          for pkg in $(go list ./...); do
+            for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
+              go test -run='^$' -fuzz="^${target}\$" -fuzztime=20s "$pkg"
+            done
+          done

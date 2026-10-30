@@ -1,0 +1,6 @@
+# The Windows CI leg checks out with core.autocrlf on, which would rewrite every text file to CRLF
+# and make a byte-exact fixture or golden file differ from the one committed.
+* text=auto eol=lf
+
+# Fixtures are bytes, not text: no line-ending or diff rewriting.
+testdata/** -text -diff

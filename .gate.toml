@@ -1,0 +1,34 @@
+# `gate` derives build and test from the module, and finds `golangci-lint`,
+# `govulncheck` and `actionlint` only on PATH. A runner has none of the three, so
+# detection there falls back to `go vet` and skips the other two without failing
+# the run: the verdict would be green while the lint, vulnerability and workflow
+# checks never executed. Each override below runs the module's own pinned binary
+# through `go tool`, or the checksummed download for actionlint, which is not a
+# module.
+[gates.lint]
+run = "go tool golangci-lint run --allow-parallel-runners ./..."
+
+[gates.vuln]
+run = "go tool govulncheck ./..."
+
+[gates.workflows]
+run = "./scripts/actionlint"
+
+# `gate` runs its detected `golangci-lint run`, which does not run formatters, so
+# an unformatted file passes the lint gate. This is that check, as a diff rather
+# than a rewrite: a gate that rewrites the tree passes on a file nobody saw.
+[gates.fmt]
+run = "go tool golangci-lint fmt --diff ./..."
+
+# Compiles the module and its tests for Windows, where a build-tagged file can
+# break without any Linux check noticing.
+# Vets the module and its tests for every OS it builds a file for; add a GOOS here when a
+# file gains a build tag for it.
+[gates.crosscompile]
+run = "GOOS=windows GOARCH=amd64 go vet ./..."
+
+# No-op in CI, which never uses --no-verify and already scanned every commit on
+# the way in, so a second scan there spends runner minutes to repeat it. The
+# guard is what keeps one definition serving both hooks.
+[gates.gitleaks]
+run = '[ -n "$CI" ] || gitleaks git --redact --no-banner --log-level warn'

@@ -1,0 +1,5 @@
+[[hold]]
+package = "github.com/gobwas/glob"
+max_version = "0.2"
+ecosystem = "go"
+reason = "golangci-lint's depguard v2.2.1 and protogetter v1.0.1 build only against the v0.2 API (glob.Glob)"
