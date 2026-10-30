@@ -9,10 +9,11 @@
 
 ---
 
-Reads Thunderstore's package index as a stream, with interned dependency names, CDN ordering, ror2mm links, a per-version side-cache and manifest.json. Package `thunderstore`, module `github.com/Rethunk-Tech/go-thunderstore`.
+Reads Thunderstore's package index into a compact on-disk listing, with CDN ordering, ror2mm links and manifest.json. Package `thunderstore`, module `github.com/Rethunk-Tech/go-thunderstore`.
 
-<!-- scaffold: one short paragraph on what the package guarantees and why it exists, in plain
-words. -->
+For installers and mod managers that browse Thunderstore. A community's index is downloaded once, stored as a compact
+listing, and answered from disk after that: a stale listing is served at once while a rebuild runs behind it. Oversized
+or hostile answers fail with an error instead of exhausting memory.
 
 ## Quick start
 
@@ -24,7 +25,11 @@ A worked example and the contracts: [HUMANS.md](HUMANS.md).
 
 ## Features
 
-<!-- scaffold: 3 to 6 bullets, each a capability a caller can rely on. No roadmap. -->
+- `Client` keeps a community's package index on disk, an hour fresh, and refreshes it in the background.
+- `Index`, `Client.Each` and `Client.Find` read it whole or a package at a time; repeated dependency names are held once.
+- `Client.Versions` answers a package's version list from a small side file, without loading the listing.
+- Every answer is size-capped and every index-named chunk address is checked.
+- `ParseLink`, `CDNOrder`, `OnHost` and `ParseManifest` cover `ror2mm://` links, download hosts and `manifest.json`.
 
 ## Documentation
 

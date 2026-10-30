@@ -6,4 +6,15 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Client` reads a community's package index through an on-disk cache: stale listings are served at once while a
+  rebuild runs in the background, `Config.Refreshed` reports a changed listing, oversized or hostile answers are
+  refused.
+- `Index`, `Client.Each`, `Client.Find` and `EachStored` read the compact listing whole or a package at a time.
+- `Client.Versions` answers a package's versions from a side file without loading the listing.
+- `ParseLink` reads `ror2mm://` install links.
+- `CDNs`, `OnHost` and `CDNOrder` order Thunderstore's download hosts.
+- `ParseManifest` reads a package's `manifest.json`, BOM included.
+
 [Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/commits/main
