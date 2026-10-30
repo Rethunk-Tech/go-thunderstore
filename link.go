@@ -18,7 +18,6 @@ const Scheme = "ror2mm"
 var (
 	part       = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 	versionRe  = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
-	repoPart   = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 	errBadLink = errors.New("not a ror2mm install link")
 )
 

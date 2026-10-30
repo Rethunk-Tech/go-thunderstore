@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Rethunk-Tech/go-github"
 	"github.com/Rethunk-Tech/go-semverish"
 )
 
@@ -176,10 +177,10 @@ func githubRepo(raw string) string {
 		return ""
 	}
 	owner, name := parts[0], strings.TrimSuffix(parts[1], ".git")
-	if !repoPart.MatchString(owner) || !repoPart.MatchString(name) || strings.Trim(owner, ".") == "" || strings.Trim(name, ".") == "" {
-		return ""
+	if ownerRepo := owner + "/" + name; github.ValidRepo(ownerRepo) {
+		return ownerRepo
 	}
-	return owner + "/" + name
+	return ""
 }
 
 // released is an RFC 3339 time as Unix seconds, or 0 when it does not parse.
