@@ -6,6 +6,8 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-30
+
 ### Added
 
 - `Client.Stored` reads a community's listing without the network: the held index, else the stored file however old,
@@ -26,5 +28,6 @@ Notable changes to `go-thunderstore`. The format follows
 - `CDNs`, `OnHost` and `CDNOrder` order Thunderstore's download hosts.
 - `ParseManifest` reads a package's `manifest.json`, BOM included.
 
-[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Rethunk-Tech/go-thunderstore/releases/tag/v0.1.0
