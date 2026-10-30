@@ -16,7 +16,7 @@ Please do not open a public issue for a suspected vulnerability first.
 
 - Index and chunk responses (`Client.Index`, `Each`, `Find`, `Versions`): remote JSON, possibly gzip. Each body is read
   capped (16 MiB) and each gzip stream capped on unpacking (64 MiB), failing as `safefs.ErrTooLarge` rather than
-  allocating without bound or parsing a truncation. At most 500 chunks are followed.
+  allocating without bound or parsing a truncation. At most 500 chunks are followed. A chunk must not panic the decoder or the slimming (`FuzzIndexChunkDecode`).
 - Chunk addresses named by the index: only the configured base host or https `thunderstore.io` hosts are fetched; a
   crafted index must not make the client request another host (an SSRF), and one bad address aborts the build.
 - Community keys: a key that is not lowercase letters, digits and hyphens is refused before a request or a path is

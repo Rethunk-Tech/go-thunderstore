@@ -2,7 +2,7 @@
 
 Package `thunderstore` reads Thunderstore's package index into an on-disk compact listing, serves it through `Client`,
 and parses `ror2mm://` links and `manifest.json`. Installers and mod managers import it. It imports no consumer
-package, only go-httpkit and go-safefs; search ranking, installing and wording a player reads stay in the caller.
+package, only go-httpkit, go-safefs and go-semverish; search ranking, installing and wording a player reads stay in the caller.
 
 ## Gate
 

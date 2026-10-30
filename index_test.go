@@ -1,6 +1,7 @@
 package thunderstore
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -115,4 +116,27 @@ func TestGitHubRepoReadsOnlyRepositoryAddresses(t *testing.T) {
 	if webLink("javascript:alert(1)") != "" || webLink("https://ko-fi.com/x") == "" {
 		t.Error("webLink")
 	}
+}
+
+func FuzzIndexChunkDecode(f *testing.F) {
+	f.Add([]byte(`[]`))
+	f.Add([]byte(`[{"name":"a","owner":"b","versions":[{"version_number":"1.0.0","dependencies":["x-y-1.0.0"]}]}]`))
+	f.Add([]byte(`[{"versions":[]}]`))
+	f.Add([]byte(`{"x":`))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		names := depNames{index: map[string]uint32{}}
+		var pk []wirePackage
+		if json.Unmarshal(b, &pk) != nil {
+			return
+		}
+		for i := range pk {
+			if len(pk[i].Versions) == 0 {
+				continue
+			}
+			p := slim(&pk[i], &names)
+			if p.ID() == "" && len(p.Versions) != len(pk[i].Versions) {
+				t.Fatalf("versions lost from %q", b)
+			}
+		}
+	})
 }
