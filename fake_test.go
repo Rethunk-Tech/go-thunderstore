@@ -43,8 +43,10 @@ func listing(owner, name, desc string, downloads int, dep, nsfw bool) map[string
 		"date_created": "2025-01-01T00:00:00Z", "rating_score": 3, "is_deprecated": dep, "has_nsfw_content": nsfw,
 		"donation_link": "https://ko-fi.com/" + owner, "categories": []string{"Items"},
 		"versions": []ver{
-			{Description: desc, VersionNumber: "2.0.0", DateCreated: "2026-01-15T10:00:00.123456Z", Dependencies: []string{"BepInEx-BepInExPack-5.4.2100"},
-				Downloads: downloads, FileSize: 99, WebsiteURL: "https://github.com/" + owner + "/" + name + ".git"},
+			{
+				Description: desc, VersionNumber: "2.0.0", DateCreated: "2026-01-15T10:00:00.123456Z", Dependencies: []string{"BepInEx-BepInExPack-5.4.2100"},
+				Downloads: downloads, FileSize: 99, WebsiteURL: "https://github.com/" + owner + "/" + name + ".git",
+			},
 			{Description: desc, VersionNumber: "1.0.0", DateCreated: "2025-12-01T00:00:00Z", Downloads: 1},
 		},
 	}
