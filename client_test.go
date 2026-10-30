@@ -288,3 +288,32 @@ func TestStoredUsesTheHeldListing(t *testing.T) {
 		t.Fatalf("held read: ok %v err %v deps %d (memory copy carries dependencies)", ok, err, deps)
 	}
 }
+
+func TestSnapshotAndEachPreferTheHeldListing(t *testing.T) {
+	f := newFake(t)
+	c := f.client(t, nil)
+	x, err := c.Snapshot(t.Context(), community)
+	if err != nil || len(x.Packages()) != 3 || c.Held(community) {
+		t.Fatalf("snapshot: %v, held %v", err, c.Held(community))
+	}
+	held, err := c.Index(t.Context(), community)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x, err = c.Snapshot(t.Context(), community); err != nil || x != held {
+		t.Fatalf("snapshot of a held listing: %v, same copy %v", err, x == held)
+	}
+	n := 0
+	if err := c.Each(t.Context(), community, func(p *Package) { n += len(p.Dependencies(p.Versions[0])) }); err != nil || n != 3 {
+		t.Fatalf("each from memory: %d deps, %v", n, err)
+	}
+	for name, err := range map[string]error{
+		"Snapshot": func() error { _, err := c.Snapshot(t.Context(), "Bad Key"); return err }(),
+		"Each":     c.Each(t.Context(), "Bad Key", func(*Package) {}),
+		"Find":     func() error { _, _, err := c.Find(t.Context(), "Bad Key", "a", "b"); return err }(),
+	} {
+		if err == nil {
+			t.Errorf("%s accepted a bad community key", name)
+		}
+	}
+}
