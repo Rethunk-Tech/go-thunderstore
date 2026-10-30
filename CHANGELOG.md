@@ -6,6 +6,8 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-30
+
 ### Added
 
 - `Client` reads a community's package index through an on-disk cache: stale listings are served at once while a
@@ -17,4 +19,5 @@ Notable changes to `go-thunderstore`. The format follows
 - `CDNs`, `OnHost` and `CDNOrder` order Thunderstore's download hosts.
 - `ParseManifest` reads a package's `manifest.json`, BOM included.
 
-[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/commits/main
+[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Rethunk-Tech/go-thunderstore/releases/tag/v0.1.0
