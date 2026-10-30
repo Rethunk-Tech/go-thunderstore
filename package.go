@@ -2,9 +2,9 @@ package thunderstore
 
 import (
 	"encoding/json"
+	"github.com/Rethunk-Tech/go-semverish"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -107,26 +107,10 @@ func (p Package) Outranks(q Package) bool {
 
 func packageID(owner, name string) string { return strings.ToLower(owner + "-" + name) }
 
-// newer reports whether a is a later "1.2.3" version than b; either failing to parse means not newer.
+// newer reports whether a is a later version than b; either failing to parse means not newer.
 func newer(a, b string) bool {
-	x, okA := triple(a)
-	y, okB := triple(b)
-	return okA && okB && slices.Compare(x[:], y[:]) > 0
-}
-
-func triple(s string) (out [3]int, ok bool) {
-	parts := strings.Split(s, ".")
-	if len(parts) != 3 {
-		return out, false
-	}
-	for i, p := range parts {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 0 {
-			return out, false
-		}
-		out[i] = n
-	}
-	return out, true
+	c, ok := semverish.Compare(a, b)
+	return ok && c > 0
 }
 
 // wirePackage is a v1 package listing as the site serves it.
