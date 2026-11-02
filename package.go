@@ -2,6 +2,7 @@ package thunderstore
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"slices"
 	"strings"
@@ -191,3 +192,26 @@ func released(rfc3339 string) int64 {
 	}
 	return t.Unix()
 }
+
+// Dependency is one entry of a manifest's dependencies: a package version named "Namespace-Name-1.2.3".
+type Dependency struct {
+	Namespace, Name, Version string
+}
+
+// ParseDependency splits "Namespace-Name-1.2.3". The namespace is the text before the first hyphen and the version
+// the text after the last; the name between them holds no hyphen, since Thunderstore names use underscores.
+func ParseDependency(s string) (Dependency, error) {
+	ns, rest, ok := strings.Cut(s, "-")
+	i := strings.LastIndexByte(rest, '-')
+	if !ok || i < 0 {
+		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", s)
+	}
+	d := Dependency{Namespace: ns, Name: rest[:i], Version: rest[i+1:]}
+	if d.Namespace == "" || d.Name == "" || d.Version == "" || strings.Contains(d.Name, "-") {
+		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", s)
+	}
+	return d, nil
+}
+
+// String is the "Namespace-Name-Version" form ParseDependency reads.
+func (d Dependency) String() string { return d.Namespace + "-" + d.Name + "-" + d.Version }

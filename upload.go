@@ -13,8 +13,25 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Rethunk-Tech/go-httpkit"
 	"github.com/Rethunk-Tech/go-safefs"
 )
+
+// uploadStatusError is a non-2xx answer from the site or its storage. It unwraps to a *httpkit.StatusError, so
+// errors.As finds the status and errors.Is(err, httpkit.ErrNotFound) matches a 404.
+type uploadStatusError struct {
+	status       httpkit.StatusError
+	prefix, body string
+}
+
+func (e *uploadStatusError) Error() string {
+	if e.body == "" {
+		return e.prefix + ": " + e.status.Status
+	}
+	return e.prefix + ": " + e.status.Status + ": " + e.body
+}
+
+func (e *uploadStatusError) Unwrap() error { return &e.status }
 
 // Uploader publishes a package zip to Thunderstore the way its CLI does: the zip goes to the site's storage in the
 // parts the site asks for, then is submitted under a team in a community.
@@ -63,7 +80,7 @@ func (u *Uploader) call(ctx context.Context, path string, body, out any) error {
 	defer func() { _ = res.Body.Close() }()
 	reply, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("thunderstore %s: %s: %s", path, res.Status, strings.TrimSpace(string(reply)))
+		return &uploadStatusError{prefix: "thunderstore " + path, status: httpkit.StatusError{Code: res.StatusCode, Status: res.Status}, body: strings.TrimSpace(string(reply))}
 	}
 	if out == nil {
 		return nil
@@ -122,7 +139,7 @@ func (u *Uploader) putPart(ctx context.Context, data []byte, part uploadPart) (s
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode >= http.StatusBadRequest {
-		return "", fmt.Errorf("uploading part %d: %s", part.PartNumber, res.Status)
+		return "", &uploadStatusError{prefix: fmt.Sprintf("uploading part %d", part.PartNumber), status: httpkit.StatusError{Code: res.StatusCode, Status: res.Status}}
 	}
 	etag := res.Header.Get("ETag")
 	if etag == "" {

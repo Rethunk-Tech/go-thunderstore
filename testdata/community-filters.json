@@ -1,0 +1,30 @@
+{
+ "package_categories": [
+  {
+   "id": "660",
+   "name": "Tools",
+   "slug": "tools"
+  },
+  {
+   "id": "658",
+   "name": "Mods",
+   "slug": "mods"
+  },
+  {
+   "id": "659",
+   "name": "Modpacks",
+   "slug": "modpacks"
+  },
+  {
+   "id": "872",
+   "name": "Tweaks & Quality Of Life",
+   "slug": "tweaks-and-quality-of-life"
+  },
+  {
+   "id": "2086",
+   "name": "AI Generated",
+   "slug": "ai-generated"
+  }
+ ],
+ "sections": []
+}

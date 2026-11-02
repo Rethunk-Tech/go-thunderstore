@@ -504,3 +504,29 @@ func (c *Client) build(ctx context.Context, chunks []string, path string) error 
 		return bw.Flush()
 	})
 }
+
+// Category is one of a community's package categories. Slug is what Submit files a package under.
+type Category struct {
+	Slug, Name string
+}
+
+// Categories lists the community's package categories. A failed request is a *httpkit.StatusError, as for the index.
+func (c *Client) Categories(ctx context.Context, community string) ([]Category, error) {
+	if !communityKey.MatchString(community) {
+		return nil, fmt.Errorf("%q is not a Thunderstore community key", community)
+	}
+	var filters struct {
+		Categories []struct {
+			Slug string `json:"slug"`
+			Name string `json:"name"`
+		} `json:"package_categories"`
+	}
+	if _, err := c.getJSON(ctx, c.cfg.BaseURL+"/api/cyberstorm/community/"+community+"/filters/", &filters); err != nil {
+		return nil, err
+	}
+	out := make([]Category, len(filters.Categories))
+	for i, cat := range filters.Categories {
+		out[i] = Category{Slug: cat.Slug, Name: cat.Name}
+	}
+	return out, nil
+}
