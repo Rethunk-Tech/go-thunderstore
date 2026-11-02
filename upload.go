@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Rethunk-Tech/go-httpkit"
@@ -32,6 +33,39 @@ func (e *uploadStatusError) Error() string {
 }
 
 func (e *uploadStatusError) Unwrap() error { return &e.status }
+
+var uploadUUID = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
+
+const (
+	maxUploadParts = 10000
+	maxErrorBody   = 300
+)
+
+func cutBody(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > maxErrorBody {
+		return strings.ToValidUTF8(s[:maxErrorBody], "") + "..."
+	}
+	return s
+}
+
+// checkParts requires the parts to tile the file from offset 0 to its size, in order.
+func checkParts(parts []uploadPart, size int64) error {
+	if len(parts) > maxUploadParts {
+		return fmt.Errorf("thunderstore asked for %d parts", len(parts))
+	}
+	var next int64
+	for _, p := range parts {
+		if p.Offset != next || p.Length < 0 {
+			return fmt.Errorf("thunderstore part %d does not follow the one before", p.PartNumber)
+		}
+		next += p.Length
+	}
+	if next != size {
+		return fmt.Errorf("thunderstore's parts cover %d of %d bytes", next, size)
+	}
+	return nil
+}
 
 // Uploader publishes a package zip to Thunderstore the way its CLI does: the zip goes to the site's storage in the
 // parts the site asks for, then is submitted under a team in a community.
@@ -80,7 +114,7 @@ func (u *Uploader) call(ctx context.Context, path string, body, out any) error {
 	defer func() { _ = res.Body.Close() }()
 	reply, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode >= http.StatusBadRequest {
-		return &uploadStatusError{prefix: "thunderstore " + path, status: httpkit.StatusError{Code: res.StatusCode, Status: res.Status}, body: strings.TrimSpace(string(reply))}
+		return &uploadStatusError{prefix: "thunderstore " + path, status: httpkit.StatusError{Code: res.StatusCode, Status: res.Status}, body: cutBody(string(reply))}
 	}
 	if out == nil {
 		return nil
@@ -105,6 +139,13 @@ func (u *Uploader) Upload(ctx context.Context, zipPath string) (string, error) {
 		return "", err
 	}
 	uuid := started.UserMedia.UUID
+	if !uploadUUID.MatchString(uuid) {
+		return "", fmt.Errorf("thunderstore returned an invalid upload id")
+	}
+	if err := checkParts(started.UploadURLs, int64(len(data))); err != nil {
+		_ = u.call(context.WithoutCancel(ctx), "usermedia/"+uuid+"/abort-upload/", map[string]any{}, nil)
+		return "", err
+	}
 	parts := make([]finishedPart, 0, len(started.UploadURLs))
 	for _, part := range started.UploadURLs {
 		etag, err := u.putPart(ctx, data, part)

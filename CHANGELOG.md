@@ -6,6 +6,12 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-02
+
+### Fixed
+
+- `Upload` refuses an upload id that is not a UUID and parts that do not tile the file from offset 0 (at most 10000), and error bodies in messages are cut to 300 bytes.
+
 ## [0.3.0] - 2026-11-02
 
 ### Added
@@ -51,7 +57,8 @@ Notable changes to `go-thunderstore`. The format follows
 - `CDNs`, `OnHost` and `CDNOrder` order Thunderstore's download hosts.
 - `ParseManifest` reads a package's `manifest.json`, BOM included.
 
-[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.1.1...v0.1.2

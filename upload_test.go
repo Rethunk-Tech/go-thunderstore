@@ -39,8 +39,8 @@ func TestUploaderFollowsTheCLIProtocol(t *testing.T) {
 			return
 		case strings.HasSuffix(r.URL.Path, "/initiate-upload/"):
 			auth = append(auth, r.Header.Get("Authorization"))
-			_, _ = fmt.Fprintf(w, `{"user_media":{"uuid":"u1"},"upload_urls":[{"part_number":1,"url":"%[1]s/part/1","offset":0,"length":5},{"part_number":2,"url":"%[1]s/part/2","offset":5,"length":5}]}`, srv.URL)
-		case strings.HasSuffix(r.URL.Path, "/usermedia/u1/finish-upload/"):
+			_, _ = fmt.Fprintf(w, `{"user_media":{"uuid":"12345678-1234-1234-1234-123456789012"},"upload_urls":[{"part_number":1,"url":"%[1]s/part/1","offset":0,"length":5},{"part_number":2,"url":"%[1]s/part/2","offset":5,"length":5}]}`, srv.URL)
+		case strings.HasSuffix(r.URL.Path, "/usermedia/12345678-1234-1234-1234-123456789012/finish-upload/"):
 			_ = json.Unmarshal(body, &finished)
 		case strings.HasSuffix(r.URL.Path, "/submission/submit/"):
 			auth = append(auth, r.Header.Get("Authorization"))
@@ -53,7 +53,7 @@ func TestUploaderFollowsTheCLIProtocol(t *testing.T) {
 	defer srv.Close()
 	up := NewUploader(srv.Client(), srv.URL, "tok")
 	uuid, err := up.Upload(t.Context(), pkg)
-	if err != nil || uuid != "u1" {
+	if err != nil || uuid != "12345678-1234-1234-1234-123456789012" {
 		t.Fatalf("upload = %q, %v", uuid, err)
 	}
 	if got, _ := json.Marshal(finished["parts"]); string(got) != `[{"ETag":"\"1\"","PartNumber":1},{"ETag":"\"2\"","PartNumber":2}]` {
@@ -63,7 +63,7 @@ func TestUploaderFollowsTheCLIProtocol(t *testing.T) {
 	if err != nil || page != "https://thunderstore.io/c/lethal-company/p/Ab/ShopDrop/" {
 		t.Fatalf("submit = %q, %v", page, err)
 	}
-	if submitted["author_name"] != "Ab" || submitted["upload_uuid"] != "u1" || fmt.Sprint(submitted["community_categories"]) != "map[lethal-company:[mods]]" {
+	if submitted["author_name"] != "Ab" || submitted["upload_uuid"] != "12345678-1234-1234-1234-123456789012" || fmt.Sprint(submitted["community_categories"]) != "map[lethal-company:[mods]]" {
 		t.Errorf("submitted = %v", submitted)
 	}
 	if !slices.Equal(auth, []string{"Bearer tok", "Bearer tok"}) {
@@ -77,5 +77,40 @@ func TestUploaderRefusesAnHTTPPartURL(t *testing.T) {
 	_, err := up.putPart(t.Context(), []byte("abc"), uploadPart{PartNumber: 1, Offset: 0, Length: 3, URL: "http://evil.example/part"})
 	if err == nil || !strings.Contains(err.Error(), "not https") {
 		t.Fatalf("err = %v, want the http part URL refused", err)
+	}
+}
+
+func TestUploadRefusesBadInitiateAnswers(t *testing.T) {
+	pkg := filepath.Join(t.TempDir(), "a.zip")
+	if err := safefs.WriteFile(pkg, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, answer := range map[string]string{
+		"uuid":    `{"user_media":{"uuid":"../../x"},"upload_urls":[]}`,
+		"gap":     `{"user_media":{"uuid":"12345678-1234-1234-1234-123456789012"},"upload_urls":[{"part_number":1,"url":"x","offset":0,"length":4}]}`,
+		"overlap": `{"user_media":{"uuid":"12345678-1234-1234-1234-123456789012"},"upload_urls":[{"part_number":1,"url":"x","offset":0,"length":10},{"part_number":2,"url":"x","offset":5,"length":5}]}`,
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/initiate-upload/") {
+				_, _ = w.Write([]byte(answer))
+			}
+		}))
+		_, err := NewUploader(srv.Client(), srv.URL, "tok").Upload(t.Context(), pkg)
+		srv.Close()
+		if err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+}
+
+func TestErrorBodyIsCut(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(strings.Repeat("x", 5000)))
+	}))
+	defer srv.Close()
+	err := NewUploader(srv.Client(), srv.URL, "tok").call(t.Context(), "p/", map[string]any{}, nil)
+	if err == nil || len(err.Error()) > 400 {
+		t.Fatalf("err len = %d", len(fmt.Sprint(err)))
 	}
 }
