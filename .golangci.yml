@@ -94,6 +94,10 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+    # canon go-golangci-lint-00016
+    usetesting:
+      context-background: true
+      context-todo: true
     # canon go-golangci-lint-00005
     staticcheck:
       checks: ["all"]
