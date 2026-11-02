@@ -114,3 +114,17 @@ func TestErrorBodyIsCut(t *testing.T) {
 		t.Fatalf("err len = %d", len(fmt.Sprint(err)))
 	}
 }
+
+func TestUploaderDoesNotFollowADowngradeWithTheToken(t *testing.T) {
+	leaked := false
+	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }))
+	defer plain.Close()
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL, http.StatusTemporaryRedirect)
+	}))
+	defer tls.Close()
+	err := NewUploader(tls.Client(), tls.URL, "secret").call(t.Context(), "p/", map[string]any{}, nil)
+	if err == nil || leaked {
+		t.Fatalf("err = %v, request reached the plain-http server = %v", err, leaked)
+	}
+}

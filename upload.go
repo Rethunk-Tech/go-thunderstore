@@ -81,6 +81,7 @@ func NewUploader(client *http.Client, site, token string) *Uploader {
 	if client == nil {
 		client = http.DefaultClient
 	}
+	client = httpkit.WithRedirect(client, httpkit.NoDowngrade)
 	return &Uploader{client: client, site: strings.TrimRight(site, "/") + "/", token: token}
 }
 

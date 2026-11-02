@@ -6,6 +6,10 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `Uploader` refuses a redirect from https to http, as `Client` does, so a downgrade never carries the upload token.
+
 ## [0.3.1] - 2026-11-02
 
 ### Fixed
