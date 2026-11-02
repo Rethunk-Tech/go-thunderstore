@@ -202,11 +202,11 @@ type Dependency struct {
 // the text after the last; the name between them holds no hyphen, since Thunderstore names use underscores.
 func ParseDependency(s string) (Dependency, error) {
 	ns, rest, ok := strings.Cut(s, "-")
-	i := strings.LastIndexByte(rest, '-')
-	if !ok || i < 0 {
+	name, version, found := strings.CutLast(rest, "-")
+	if !ok || !found {
 		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", s)
 	}
-	d := Dependency{Namespace: ns, Name: rest[:i], Version: rest[i+1:]}
+	d := Dependency{Namespace: ns, Name: name, Version: version}
 	if d.Namespace == "" || d.Name == "" || d.Version == "" || strings.Contains(d.Name, "-") {
 		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", s)
 	}
