@@ -42,3 +42,4 @@ cannot resolve that check from PATH.
 | `link.go` | `Ref`, `ParseLink` |
 | `cdn.go` | `CDNs`, `OnHost`, `CDNOrder` |
 | `manifest.go` | `Manifest`, `ParseManifest` |
+| `upload.go` | `Uploader`: part upload and submit |

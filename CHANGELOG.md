@@ -6,6 +6,10 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Uploader` (`NewUploader`, `Upload`, `Submit`) uploads a package zip in the parts Thunderstore's storage asks for and submits it, as Thunderstore's CLI does.
+
 ## [0.1.2] - 2026-10-30
 
 ### Changed

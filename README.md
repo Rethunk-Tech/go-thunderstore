@@ -28,6 +28,7 @@ A worked example and the contracts: [HUMANS.md](HUMANS.md).
 - `Client` keeps a community's package index on disk, an hour fresh, and refreshes it in the background.
 - `Index`, `Client.Each` and `Client.Find` read it whole or a package at a time; repeated dependency names are held once.
 - `Client.Versions` answers a package's version list from a small side file, without loading the listing.
+- `Uploader` uploads a package zip and submits it under a team, as Thunderstore's CLI does.
 - Every answer is size-capped and every index-named chunk address is checked.
 - `ParseLink`, `CDNOrder`, `OnHost` and `ParseManifest` cover `ror2mm://` links, download hosts and `manifest.json`.
 
