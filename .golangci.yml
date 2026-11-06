@@ -21,6 +21,7 @@ linters:
     - gocheckcompilerdirectives
     - gochecknoinits
     - gochecksumtype
+    - gocognit
     - gocritic
     - godot
     - godox
@@ -58,7 +59,14 @@ linters:
   # canon go-golangci-lint-00014
   exclusions:
     generated: lax
+    rules:
+      - path: _test\.go
+        linters:
+          - gocognit
   settings:
+    # canon go-golangci-lint-00017
+    gocognit:
+      min-complexity: 30
     # canon go-golangci-lint-00008
     govet:
       enable-all: true
