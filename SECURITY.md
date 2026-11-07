@@ -18,7 +18,8 @@ Please do not open a public issue for a suspected vulnerability first.
   capped (16 MiB) and each gzip stream capped on unpacking (64 MiB), failing as `safefs.ErrTooLarge` rather than
   allocating without bound or parsing a truncation. At most 500 chunks are followed. A chunk must not panic the decoder or the slimming (`FuzzIndexChunkDecode`).
 - Chunk addresses named by the index: only the configured base host or https `thunderstore.io` hosts are fetched; a
-  crafted index must not make the client request another host (an SSRF), and one bad address aborts the build.
+  crafted index must not make the client request another host (an SSRF), and one bad address aborts the build. A
+  redirect from any request must also land on one of those hosts.
 - Community keys: a key that is not lowercase letters, digits and hyphens is refused before a request or a path is
   built, so it cannot move the request URL or the cache path.
 - Stored listings: a cache file with a dependency index past its name table is refused, not indexed (no panic).

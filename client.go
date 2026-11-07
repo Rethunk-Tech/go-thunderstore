@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -38,6 +39,9 @@ const (
 	maxBody     = 16 << 20
 	maxUnpacked = maxBody * 4
 	maxChunks   = 500
+	// maxListing caps the stored listing a build writes, however many chunks the index names (a large community
+	// is about 65 MB).
+	maxListing = 512 << 20
 
 	// listingTag names the shape of a stored listing. It changes when the shape does, so a listing built under another
 	// shape is never read.
@@ -50,7 +54,8 @@ var communityKey = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 type Config struct {
 	// CacheDir is required. The stored listings live in its thunderstore folder.
 	CacheDir string
-	// HTTP sends every request; nil means http.DefaultClient. Redirects from https to another scheme are refused.
+	// HTTP sends every request; nil means http.DefaultClient. A redirect that leaves the hosts a chunk may be on, or
+	// drops from https, is refused.
 	HTTP *http.Client
 	// BaseURL is the site; empty means BaseURL. Chunk addresses the index names must be on this host or on
 	// thunderstore.io.
@@ -74,6 +79,7 @@ type Client struct {
 	cfg         Config
 	hc          *http.Client
 	maxUnpacked int64
+	maxListing  int64
 	listingIdle time.Duration
 
 	mu    sync.Mutex
@@ -91,11 +97,24 @@ func New(cfg Config) (*Client, error) {
 		return nil, errors.New("thunderstore: Config.CacheDir is required")
 	}
 	cfg.BaseURL = strings.TrimRight(cmp.Or(cfg.BaseURL, BaseURL), "/")
-	return &Client{
-		cfg: cfg, hc: httpkit.WithRedirect(cmp.Or(cfg.HTTP, http.DefaultClient), httpkit.NoDowngrade),
-		maxUnpacked: maxUnpacked, listingIdle: 10 * time.Minute,
+	c := &Client{
+		cfg: cfg, maxUnpacked: maxUnpacked, maxListing: maxListing, listingIdle: 10 * time.Minute,
 		locks: map[string]*sync.Mutex{}, memo: map[string]memoEntry{}, tried: map[string]time.Time{},
-	}, nil
+	}
+	c.hc = httpkit.WithRedirect(cmp.Or(cfg.HTTP, http.DefaultClient), c.checkRedirect)
+	return c, nil
+}
+
+// checkRedirect keeps every hop on a host chunkAllowed trusts, so a trusted host cannot answer with a redirect that
+// sends the client, or its request, anywhere else.
+func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
+	if err := httpkit.NoDowngrade(req, via); err != nil {
+		return err
+	}
+	if !c.chunkAllowed(req.URL.String()) {
+		return fmt.Errorf("thunderstore: redirect to %s refused", req.URL.Host)
+	}
+	return nil
 }
 
 // Wait blocks until the background refreshes started so far have finished, so a caller may remove the cache folder.
@@ -103,54 +122,69 @@ func (c *Client) Wait() { c.refreshes.Wait() }
 
 // Index is the community's package listing, loaded whole and kept in memory until nothing has asked for it for ten
 // minutes. A listing holds tens of megabytes for a large community: prefer Each or Find for one pass or one package.
-func (c *Client) Index(ctx context.Context, community string) (*Index, error) {
+func (c *Client) Index(ctx context.Context, community string) (idx *Index, err error) {
+	err = c.onListing(ctx, community, func(path string) (err error) {
+		idx, err = c.load(community, path)
+		return err
+	})
+	return idx, err
+}
+
+// onListing runs fn on the community's listing file. A refresh that finishes between ListingFile and fn's open removes
+// the file ListingFile named; the open then fails before fn has read anything, so asking once more is safe.
+func (c *Client) onListing(ctx context.Context, community string, fn func(path string) error) error {
 	path, err := c.ListingFile(ctx, community)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return c.load(community, path)
+	if err = fn(path); !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if path, err = c.ListingFile(ctx, community); err != nil {
+		return err
+	}
+	return fn(path)
 }
 
 // Snapshot is the community's index for one pass of a check that runs often: the copy Index holds when it holds one,
 // else read from disk and left to the collector.
-func (c *Client) Snapshot(ctx context.Context, community string) (*Index, error) {
-	path, err := c.ListingFile(ctx, community)
-	if err != nil {
-		return nil, err
-	}
-	if x, ok := c.memoized(community, path); ok {
-		return x, nil
-	}
-	pk, err := readPackages(path)
-	if err != nil {
-		return nil, err
-	}
-	return &Index{pk}, nil
+func (c *Client) Snapshot(ctx context.Context, community string) (idx *Index, err error) {
+	err = c.onListing(ctx, community, func(path string) error {
+		if x, ok := c.memoized(community, path); ok {
+			idx = x
+			return nil
+		}
+		pk, err := readPackages(path)
+		if err != nil {
+			return err
+		}
+		idx = &Index{pk}
+		return nil
+	})
+	return idx, err
 }
 
 // Each calls fn with each package of the community's listing, from memory when Index holds it, else a package at a
 // time from disk. Packages read from disk carry no Dependencies, and a package listed under two case-folded ids comes
 // twice: Package.Outranks picks.
 func (c *Client) Each(ctx context.Context, community string, fn func(*Package)) error {
-	path, err := c.ListingFile(ctx, community)
-	if err != nil {
-		return err
-	}
-	if x, ok := c.memoized(community, path); ok {
-		x.Each(fn)
-		return nil
-	}
-	return EachStored(path, fn)
+	return c.onListing(ctx, community, func(path string) error {
+		if x, ok := c.memoized(community, path); ok {
+			x.Each(fn)
+			return nil
+		}
+		return EachStored(path, fn)
+	})
 }
 
 // Find is the package owner-name in the community's listing, read a package at a time without loading the listing;
 // ok is false when it is not listed. The package carries no Dependencies.
 func (c *Client) Find(ctx context.Context, community, owner, name string) (p Package, ok bool, err error) {
-	path, err := c.ListingFile(ctx, community)
-	if err != nil {
-		return Package{}, false, err
-	}
-	return findStored(path, owner, name)
+	err = c.onListing(ctx, community, func(path string) (err error) {
+		p, ok, err = findStored(path, owner, name)
+		return err
+	})
+	return p, ok, err
 }
 
 func findStored(path, owner, name string) (found Package, ok bool, err error) {
@@ -237,6 +271,9 @@ func (c *Client) metaPath(community string) string {
 func (c *Client) readMeta(community string) (m cacheMeta) {
 	if b, err := safefs.ReadFile(c.metaPath(community)); err == nil {
 		_ = json.Unmarshal(b, &m)
+	}
+	if !validHash(m.Hash) {
+		m.Hash = ""
 	}
 	return m
 }
@@ -391,14 +428,32 @@ func dropOtherListings(dir, community, keep string) {
 		return
 	}
 	for _, e := range ents {
-		rest, ok := strings.CutPrefix(e.Name(), community+"-c")
-		tag, _, tagged := strings.Cut(rest, "-")
 		path := filepath.Join(dir, e.Name())
-		if !ok || !tagged || tag == "" || strings.Trim(tag, "0123456789") != "" || !listingOrTemp(rest) || path == keep {
+		if path == keep || !ownListing(e.Name(), community) {
 			continue
 		}
 		_ = safefs.Remove(path)
 	}
+}
+
+// ownListing reports whether name is a listing file or build temp file of exactly this community under some tag:
+// "<community>-c<digits>-<hash>.json", where another community's key may itself contain "-c<digits>-".
+func ownListing(name, community string) bool {
+	rest, ok := strings.CutPrefix(name, community+"-c")
+	tag, tail, tagged := strings.Cut(rest, "-")
+	if !ok || !tagged || tag == "" || strings.Trim(tag, "0123456789") != "" {
+		return false
+	}
+	hash, _, _ := strings.Cut(tail, ".")
+	return listingOrTemp(tail) && validHash(hash)
+}
+
+func validHash(h string) bool {
+	if len(h) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(h)
+	return err == nil && h == strings.ToLower(h)
 }
 
 // listingOrTemp reports a listing file or a build's interrupted temp file, "<listing>.json.<n>.tmp"
@@ -471,7 +526,7 @@ func (c *Client) buildListing(ctx context.Context, community string) (string, er
 // content-addressed, so none survive an index change. The lever is refreshAfter.
 func (c *Client) build(ctx context.Context, chunks []string, path string) error {
 	return safefs.WriteStreamAtomic(path, 0o644, func(w io.Writer) error {
-		bw := bufio.NewWriter(w)
+		bw := bufio.NewWriter(&cappedWriter{w: w, left: c.maxListing})
 		enc := json.NewEncoder(bw)
 		if err := bw.WriteByte('['); err != nil {
 			return err
@@ -529,4 +584,18 @@ func (c *Client) Categories(ctx context.Context, community string) ([]Category, 
 		out[i] = Category{Slug: cat.Slug, Name: cat.Name}
 	}
 	return out, nil
+}
+
+// cappedWriter fails with safefs.ErrTooLarge once more than left bytes have been written.
+type cappedWriter struct {
+	w    io.Writer
+	left int64
+}
+
+func (cw *cappedWriter) Write(p []byte) (int, error) {
+	if int64(len(p)) > cw.left {
+		return 0, safefs.ErrTooLarge
+	}
+	cw.left -= int64(len(p))
+	return cw.w.Write(p)
 }
