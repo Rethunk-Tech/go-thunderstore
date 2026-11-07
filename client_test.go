@@ -393,3 +393,23 @@ func TestAListingGoneBetweenLookupAndOpenIsLookedUpAgain(t *testing.T) {
 		t.Fatalf("err = %v, calls = %d", err, calls)
 	}
 }
+
+// Another community's key may itself contain "-c<digits>-", so its stored listing looks like one of this
+// community's under a tag; a build must keep it.
+func TestABuildKeepsASiblingCommunitysListing(t *testing.T) {
+	f := newFake(t)
+	c := f.client(t, nil)
+	if err := os.MkdirAll(c.dir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sibling := listingPath(c.dir(), community+"-c1-x", hash64)
+	if err := os.WriteFile(sibling, []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ListingFile(t.Context(), community); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sibling); err != nil {
+		t.Fatalf("the build removed a sibling community's listing: %v", err)
+	}
+}
