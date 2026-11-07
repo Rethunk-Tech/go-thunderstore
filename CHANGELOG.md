@@ -6,6 +6,18 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-07
+
+### Added
+
+- `Uploader.AllowStorageHosts` pins the hosts an upload may send its zip to.
+
+### Fixed
+
+- `Upload` sends the zip to one named storage host.
+- `Upload` refuses part bounds that overflow, and the client refuses path-like dependencies.
+- Redirects are held to the chunk hosts, a listing is capped, a build keeps sibling communities' listings, and a listing lost to a concurrent refresh is retried.
+
 ## [0.3.2] - 2026-11-02
 
 ### Fixed
@@ -63,7 +75,8 @@ Notable changes to `go-thunderstore`. The format follows
 - `CDNs`, `OnHost` and `CDNOrder` order Thunderstore's download hosts.
 - `ParseManifest` reads a package's `manifest.json`, BOM included.
 
-[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.2.0...v0.3.0
