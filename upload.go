@@ -8,10 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Rethunk-Tech/go-httpkit"
@@ -76,6 +79,8 @@ type Uploader struct {
 	client *http.Client
 	site   string
 	token  string
+	// storageHosts, when set, are the only hosts a part may be sent to.
+	storageHosts []string
 }
 
 // NewUploader returns an Uploader for the site (such as BaseURL) that authenticates with token. A nil client means
@@ -86,6 +91,49 @@ func NewUploader(client *http.Client, site, token string) *Uploader {
 	}
 	client = httpkit.WithRedirect(client, httpkit.NoDowngrade)
 	return &Uploader{client: client, site: strings.TrimRight(site, "/") + "/", token: token}
+}
+
+// AllowStorageHosts restricts where the zip may be sent to the named hostnames (no port). Thunderstore deployments
+// choose their storage endpoint themselves (USERMEDIA_S3_ENDPOINT_URL in its settings), so there is no host the library
+// can assume; without this call the parts must still share one non-IP host, which the site's own answer names.
+func (u *Uploader) AllowStorageHosts(hosts ...string) { u.storageHosts = hosts }
+
+// checkStorage requires every part to go to one host (a deployment has one storage endpoint, so a reply that splits the
+// file across hosts is not one), that host to be a name rather than an IP address unless it is the site itself, and it
+// to be on the AllowStorageHosts list when there is one.
+func (u *Uploader) checkStorage(parts []uploadPart) error {
+	site, _ := url.Parse(u.site)
+	var host string
+	for _, p := range parts {
+		pu, err := url.Parse(p.URL)
+		if err != nil || pu.Host == "" {
+			return fmt.Errorf("thunderstore gave an unusable upload address")
+		}
+		if host == "" {
+			host = pu.Host
+		}
+		if pu.Host != host {
+			return fmt.Errorf("thunderstore split the upload across hosts")
+		}
+	}
+	if host == "" || (site != nil && host == site.Host) {
+		return nil
+	}
+	name := strings.ToLower(strings.TrimSuffix(hostOnly(host), "."))
+	if _, err := netip.ParseAddr(name); err == nil {
+		return fmt.Errorf("thunderstore gave an upload address that is an IP address")
+	}
+	if len(u.storageHosts) > 0 && !slices.ContainsFunc(u.storageHosts, func(h string) bool { return strings.EqualFold(h, name) }) {
+		return fmt.Errorf("thunderstore gave an upload host that is not allowed: %s", name)
+	}
+	return nil
+}
+
+func hostOnly(hostport string) string {
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return h
+	}
+	return strings.Trim(hostport, "[]")
 }
 
 type uploadPart struct {
@@ -147,6 +195,10 @@ func (u *Uploader) Upload(ctx context.Context, zipPath string) (string, error) {
 		return "", fmt.Errorf("thunderstore returned an invalid upload id")
 	}
 	if err := checkParts(started.UploadURLs, int64(len(data))); err != nil {
+		_ = u.call(context.WithoutCancel(ctx), "usermedia/"+uuid+"/abort-upload/", map[string]any{}, nil)
+		return "", err
+	}
+	if err := u.checkStorage(started.UploadURLs); err != nil {
 		_ = u.call(context.WithoutCancel(ctx), "usermedia/"+uuid+"/abort-upload/", map[string]any{}, nil)
 		return "", err
 	}

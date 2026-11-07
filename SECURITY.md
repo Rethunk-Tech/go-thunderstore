@@ -28,6 +28,8 @@ Please do not open a public issue for a suspected vulnerability first.
 - `ParseManifest`: a package's `manifest.json` is untrusted JSON and must not panic the parser (`FuzzParseManifest`).
 - Upstream strings `Package.Repo` and `Package.Donation`: `Repo` is a validated `owner/repo`, `Donation` is kept only
   as an http or https address, so neither carries a `javascript:` or `file:` link.
+- Upload parts: sent over https to one host the site names, never an IP address; `Uploader.AllowStorageHosts` pins the host,
+  since each Thunderstore deployment sets its own storage endpoint and no host can be assumed.
 
 ## What is out of scope
 

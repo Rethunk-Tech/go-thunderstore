@@ -142,3 +142,29 @@ func TestUploadRefusesPartBoundsThatOverflow(t *testing.T) {
 		t.Fatal("putPart accepted a part past the end")
 	}
 }
+
+func TestUploaderChecksWhereTheSiteSendsTheZip(t *testing.T) {
+	t.Parallel()
+	part := func(u string) uploadPart { return uploadPart{URL: u} }
+	tests := []struct {
+		name    string
+		allowed []string
+		parts   []uploadPart
+		ok      bool
+	}{
+		{"one named host", nil, []uploadPart{part("https://s3.example/a"), part("https://s3.example/b")}, true},
+		{"the site itself", nil, []uploadPart{part("https://thunderstore.io/a")}, true},
+		{"split across hosts", nil, []uploadPart{part("https://s3.example/a"), part("https://other.example/b")}, false},
+		{"IP literal", nil, []uploadPart{part("https://169.254.169.254/a")}, false},
+		{"IPv6 literal", nil, []uploadPart{part("https://[::1]:9000/a")}, false},
+		{"on the allow-list", []string{"S3.example"}, []uploadPart{part("https://s3.example:443/a")}, true},
+		{"off the allow-list", []string{"s3.example"}, []uploadPart{part("https://evil.example/a")}, false},
+	}
+	for _, tt := range tests {
+		up := NewUploader(nil, "https://thunderstore.io/", "")
+		up.AllowStorageHosts(tt.allowed...)
+		if err := up.checkStorage(tt.parts); (err == nil) != tt.ok {
+			t.Errorf("%s: err = %v, want ok=%t", tt.name, err, tt.ok)
+		}
+	}
+}
