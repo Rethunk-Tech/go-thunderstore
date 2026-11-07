@@ -59,6 +59,9 @@ func checkParts(parts []uploadPart, size int64) error {
 		if p.Offset != next || p.Length < 0 {
 			return fmt.Errorf("thunderstore part %d does not follow the one before", p.PartNumber)
 		}
+		if p.Length > size-next {
+			return fmt.Errorf("thunderstore part %d runs past the file", p.PartNumber)
+		}
 		next += p.Length
 	}
 	if next != size {
@@ -160,7 +163,7 @@ func (u *Uploader) Upload(ctx context.Context, zipPath string) (string, error) {
 }
 
 func (u *Uploader) putPart(ctx context.Context, data []byte, part uploadPart) (string, error) {
-	if part.Offset < 0 || part.Length < 0 || part.Offset+part.Length > int64(len(data)) {
+	if part.Offset < 0 || part.Length < 0 || part.Offset > int64(len(data)) || part.Length > int64(len(data))-part.Offset {
 		return "", fmt.Errorf("thunderstore asked for part %d outside the file", part.PartNumber)
 	}
 	chunk := data[part.Offset : part.Offset+part.Length]

@@ -3,11 +3,14 @@ package thunderstore
 import (
 	"bytes"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -170,11 +173,13 @@ func TestABuildRemovesTheCommunitysOtherListings(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stale := filepath.Join(dir, community+"-c1-0123abcd.json")
-	otherKey := filepath.Join(dir, community+"-custom-c2-0123abcd.json")
-	crashed := filepath.Join(dir, community+"-c4-0123abcd.json.987.tmp")
-	otherTemp := filepath.Join(dir, community+"-custom-c4-0123abcd.json.987.tmp")
-	for _, p := range []string{stale, otherKey, crashed, otherTemp} {
+	stale := filepath.Join(dir, community+"-c1-"+hash64+".json")
+	otherKey := filepath.Join(dir, community+"-custom-c2-"+hash64+".json")
+	crashed := filepath.Join(dir, community+"-c4-"+hash64+".json.987.tmp")
+	otherTemp := filepath.Join(dir, community+"-custom-c4-"+hash64+".json.987.tmp")
+	// A community whose key is this one plus "-c4" names its listings "<key>-c4-c4-<hash>.json".
+	sibling := filepath.Join(dir, community+"-c4-"+listingTag+"-"+hash64+".json")
+	for _, p := range []string{stale, otherKey, crashed, otherTemp, sibling} {
 		if err := os.WriteFile(p, []byte("[]"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -187,7 +192,7 @@ func TestABuildRemovesTheCommunitysOtherListings(t *testing.T) {
 			t.Fatalf("%s stayed: %v", gone, err)
 		}
 	}
-	for _, kept := range []string{otherKey, otherTemp} {
+	for _, kept := range []string{otherKey, otherTemp, sibling} {
 		if _, err := os.Stat(kept); err != nil {
 			t.Fatalf("another community's file was removed: %v", err)
 		}
@@ -315,5 +320,76 @@ func TestSnapshotAndEachPreferTheHeldListing(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s accepted a bad community key", name)
 		}
+	}
+}
+
+const hash64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+func TestAChunkRedirectCannotLeaveTheTrustedHosts(t *testing.T) {
+	var elsewhere atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		elsewhere.Add(1)
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer other.Close()
+	var base string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/chunk/") {
+			http.Redirect(w, r, other.URL, http.StatusFound)
+			return
+		}
+		_, _ = w.Write(gz(t, []string{base + "/chunk/0"}))
+	}))
+	defer srv.Close()
+	base = srv.URL
+	c, _ := New(Config{CacheDir: t.TempDir(), BaseURL: base})
+	if _, err := c.Index(t.Context(), community); err == nil {
+		t.Fatal("followed a chunk redirect to another host")
+	}
+	if elsewhere.Load() != 0 {
+		t.Fatalf("the other host was requested %d times", elsewhere.Load())
+	}
+}
+
+func TestABuildPastTheListingCapFails(t *testing.T) {
+	f := newFake(t)
+	c := f.client(t, nil)
+	c.maxListing = 100
+	if _, err := c.Index(t.Context(), community); !errors.Is(err, safefs.ErrTooLarge) {
+		t.Fatalf("Index: %v", err)
+	}
+}
+
+func TestAMetaHashThatIsNotAHashIsIgnored(t *testing.T) {
+	f := newFake(t)
+	c := f.client(t, nil)
+	if err := os.MkdirAll(c.dir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(c.metaPath(community), []byte(`{"hash":"../../x","fetched":"2099-01-01T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if h := c.readMeta(community).Hash; h != "" {
+		t.Fatalf("hash %q accepted", h)
+	}
+}
+
+func TestAListingGoneBetweenLookupAndOpenIsLookedUpAgain(t *testing.T) {
+	f := newFake(t)
+	c := f.client(t, nil)
+	first, err := c.ListingFile(t.Context(), community)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	err = c.onListing(t.Context(), community, func(path string) error {
+		calls++
+		if calls == 1 {
+			return &fs.PathError{Op: "open", Path: first, Err: fs.ErrNotExist}
+		}
+		return nil
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("err = %v, calls = %d", err, calls)
 	}
 }

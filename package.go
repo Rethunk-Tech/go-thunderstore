@@ -199,7 +199,8 @@ type Dependency struct {
 }
 
 // ParseDependency splits "Namespace-Name-1.2.3". The namespace is the text before the first hyphen and the version
-// the text after the last; the name between them holds no hyphen, since Thunderstore names use underscores.
+// the text after the last; the name between them holds no hyphen, since Thunderstore names use underscores. Namespace and name are letters,
+// digits and underscores and the version is three dot-separated numbers, as in ParseLink.
 func ParseDependency(s string) (Dependency, error) {
 	ns, rest, ok := strings.Cut(s, "-")
 	name, version, found := strings.CutLast(rest, "-")
@@ -207,7 +208,7 @@ func ParseDependency(s string) (Dependency, error) {
 		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", s)
 	}
 	d := Dependency{Namespace: ns, Name: name, Version: version}
-	if d.Namespace == "" || d.Name == "" || d.Version == "" || strings.Contains(d.Name, "-") {
+	if !part.MatchString(d.Namespace) || !part.MatchString(d.Name) || !versionRe.MatchString(d.Version) {
 		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", s)
 	}
 	return d, nil

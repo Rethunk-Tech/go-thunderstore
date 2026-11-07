@@ -128,3 +128,17 @@ func TestUploaderDoesNotFollowADowngradeWithTheToken(t *testing.T) {
 		t.Fatalf("err = %v, request reached the plain-http server = %v", err, leaked)
 	}
 }
+
+// Part bounds from the site are summed and sliced with int64 arithmetic: values that wrap must be refused, not
+// reach the slice expression.
+func TestUploadRefusesPartBoundsThatOverflow(t *testing.T) {
+	const huge = int64(1<<63 - 1)
+	parts := []uploadPart{{PartNumber: 1, Offset: 0, Length: 10}, {PartNumber: 2, Offset: 10, Length: huge}, {PartNumber: 3, Offset: -huge + 10 - 1, Length: huge}, {PartNumber: 4, Offset: 8, Length: 2}}
+	if err := checkParts(parts, 10); err == nil {
+		t.Fatal("checkParts accepted parts whose lengths wrap")
+	}
+	u := &Uploader{client: http.DefaultClient}
+	if _, err := u.putPart(t.Context(), make([]byte, 10), uploadPart{PartNumber: 2, Offset: 10, Length: huge}); err == nil {
+		t.Fatal("putPart accepted a part past the end")
+	}
+}
