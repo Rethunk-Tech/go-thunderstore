@@ -2,10 +2,15 @@ package thunderstore
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,7 +20,10 @@ func TestDepCompactorSharesIdenticalListsAndKeepsTheDependencies(t *testing.T) {
 	deps := []string{"BepInEx-BepInExPack-5.4.2100", "Owner-Lib-1.0.0"}
 	names := depNames{index: map[string]uint32{}}
 	mk := func(owner string) Package {
-		return Package{Owner: owner, Versions: []Version{{Number: "1.0.0", deps: names.ids(deps)}, {Number: "1.0.1", deps: names.ids(deps)}}}
+		return Package{
+			Owner: owner, Categories: []string{"Tools", "Client-side"},
+			Versions: []Version{{Number: "1.0.0", deps: names.ids(deps)}, {Number: "1.0.1", deps: names.ids(deps)}},
+		}
 	}
 	c := newDepCompactor()
 	a, b := mk("A"), mk("B")
@@ -25,8 +33,11 @@ func TestDepCompactorSharesIdenticalListsAndKeepsTheDependencies(t *testing.T) {
 	if len(names.names) != len(deps) {
 		t.Errorf("names = %v, want each dependency once", names.names)
 	}
-	if &a.Versions[0].deps[0] != &b.Versions[1].deps[0] {
-		t.Error("identical dependency lists must share one id slice")
+	if a.Versions[0].deps != b.Versions[1].deps || len(c.lists) != 1 {
+		t.Error("identical dependency lists must share one encoding")
+	}
+	if &a.Categories[0] != &b.Categories[0] || a.Categories[0] != "Tools" {
+		t.Error("identical category lists must share one slice")
 	}
 	if got := a.Dependencies(a.Versions[1]); !slices.Equal(got, deps) || !c.known() {
 		t.Errorf("deps = %v, want %v", got, deps)
@@ -95,6 +106,114 @@ func TestVersionNumbersSortNewestFirst(t *testing.T) {
 	got := p.VersionNumbers()
 	if got[0] != "2.0.0" || got[1] != "1.10.0" || got[2] != "1.9.0" {
 		t.Fatalf("order = %v", got)
+	}
+}
+
+// listingBody is a stored listing of pkgs packages, each with one version that names the next deps dependency names of
+// a table every file carries; withDeps false omits the dependency lists.
+func listingBody(pkgs, deps int, withDeps bool) string {
+	var names []string
+	for i := range 1 << 14 {
+		names = append(names, "Owner-Dep"+strconv.Itoa(i)+"-1.0.0")
+	}
+	var b strings.Builder
+	b.WriteByte('[')
+	for i := range pkgs {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"owner":"O%d","name":"P%d","versions":[{"v":"1.0.%d"`, i, i, i)
+		if withDeps {
+			b.WriteString(`,"d":[`)
+			for j := range deps {
+				if j > 0 {
+					b.WriteByte(',')
+				}
+				b.WriteString(strconv.Itoa(128 + (i+j)%10000))
+			}
+			b.WriteByte(']')
+		}
+		b.WriteString("}]}")
+	}
+	b.WriteString("]\n[")
+	for i, n := range names {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.Quote(n))
+	}
+	b.WriteString("]\n")
+	return b.String()
+}
+
+// retainedHeap is the live heap after a collection, the size a memo's entry keeps for listingIdle.
+func retainedHeap(t *testing.T) uint64 {
+	t.Helper()
+	runtime.GC()
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.HeapAlloc
+}
+
+// retainedOf is what reading path keeps after a collection; fn sees the packages while they are measured.
+func retainedOf(t *testing.T, path string, fn func([]Package)) uint64 {
+	t.Helper()
+	before := retainedHeap(t)
+	pk, err := readPackages(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := retainedHeap(t) - before
+	fn(pk)
+	runtime.KeepAlive(pk)
+	return held
+}
+
+// The indexes a version holds survive the varint form at every width it takes, and the stored JSON still reads as
+// uint32s.
+func TestVersionDependencyIndexesSurviveTheVarintForm(t *testing.T) {
+	t.Parallel()
+	ids := []uint32{0, 1, 127, 128, 16383, 16384, 1 << 21, math.MaxUint32}
+	if got := decodeIDs(encodeIDs(ids)); !slices.Equal(got, ids) {
+		t.Fatalf("decodeIDs(encodeIDs(%v)) = %v", ids, got)
+	}
+	var each []uint32
+	eachID(encodeIDs(ids), func(id uint32) { each = append(each, id) })
+	if !slices.Equal(each, ids) {
+		t.Fatalf("eachID = %v, want %v", each, ids)
+	}
+	b, err := Version{Number: "1.0.0", deps: encodeIDs(ids)}.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v Version
+	if err := v.UnmarshalJSON(b); err != nil || v.deps != encodeIDs(ids) {
+		t.Fatalf("%s: %+v, %v", b, v, err)
+	}
+	if empty, err := (Version{Number: "1.0.0"}).MarshalJSON(); err != nil || string(empty) != `{"v":"1.0.0"}` {
+		t.Fatalf("a version with no dependencies writes %s, %v", empty, err)
+	}
+}
+
+// A memoised listing holds each dependency list once, as two-byte varints: the same indexes as uint32 slices would
+// keep twice the bytes for as long as a large community's listing is held.
+func TestAReadListingRetainsDependencyIndexesAsVarints(t *testing.T) {
+	const pkgs, deps = 3000, 120
+	full := writeListing(t, listingBody(pkgs, deps, true))
+	lean := writeListing(t, listingBody(pkgs, deps, false))
+	count := func(pk []Package) {
+		if len(pk) != pkgs {
+			t.Fatalf("read %d packages, want %d", len(pk), pkgs)
+		}
+	}
+	whole, none := retainedOf(t, full, count), retainedOf(t, lean, count)
+	if whole <= none {
+		t.Fatalf("the fixture with dependency lists retains %d bytes, the one without %d: it must retain more", whole, none)
+	}
+	// 120 indexes cost 480 bytes a version as uint32s and 240 as varints: 1.4 MB against 720 KB over the fixture.
+	if indexes := whole - none; indexes > 1_100_000 {
+		t.Fatalf("dependency indexes retain %d bytes, want the 720000 of their varint form", indexes)
 	}
 }
 

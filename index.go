@@ -13,8 +13,9 @@ import (
 	"github.com/Rethunk-Tech/go-safefs"
 )
 
-// Index is one community's package listing, loaded whole. Dependency names, version numbers, owners, categories and
-// repositories are held once however many packages repeat them.
+// Index is one community's package listing, loaded whole. Dependency names and lists, version numbers, owners,
+// categories and repositories are held once however many packages repeat them: a dependency list is a varint run of
+// names-table indexes, about half the bytes of the same indexes as uint32s.
 type Index struct{ pk []Package }
 
 // Packages is every package, one per case-folded id. The slice and what it holds are shared: do not modify them.
@@ -46,9 +47,10 @@ type depNames struct {
 	index map[string]uint32
 }
 
-func (n *depNames) ids(deps []string) []uint32 {
+// ids is the dependency list of one version as Version holds it, numbering each name once.
+func (n *depNames) ids(deps []string) string {
 	if len(deps) == 0 {
-		return nil
+		return ""
 	}
 	out := make([]uint32, len(deps))
 	for i, d := range deps {
@@ -60,20 +62,21 @@ func (n *depNames) ids(deps []string) []uint32 {
 		}
 		out[i] = id
 	}
-	return out
+	return encodeIDs(out)
 }
 
-// depCompactor holds once what repeats across a loaded listing's packages: identical dependency lists, version
-// numbers, owners, categories and repositories.
+// depCompactor holds once what repeats across a loaded listing's packages: identical dependency lists, category
+// lists, version numbers, owners, categories and repositories.
 type depCompactor struct {
 	tab   *depTable
-	lists map[string][]uint32
+	lists map[string]string
+	cats  map[string][]string
 	words map[string]string
 	key   []byte
 }
 
 func newDepCompactor() *depCompactor {
-	return &depCompactor{tab: &depTable{}, lists: map[string][]uint32{}, words: map[string]string{}}
+	return &depCompactor{tab: &depTable{}, lists: map[string]string{}, cats: map[string][]string{}, words: map[string]string{}}
 }
 
 // word returns the one copy of s held for the listing.
@@ -89,40 +92,87 @@ func (c *depCompactor) add(p *Package) {
 	p.tab = c.tab
 	// The decoder grows slices by doubling; the listing keeps them at their length.
 	p.Versions = append(make([]Version, 0, len(p.Versions)), p.Versions...)
-	p.Categories = append(make([]string, 0, len(p.Categories)), p.Categories...)
+	p.Categories = c.categories(p.Categories)
 	p.Owner, p.Repo = c.word(p.Owner), c.word(p.Repo)
-	for i, cat := range p.Categories {
-		p.Categories[i] = c.word(cat)
-	}
 	for j := range p.Versions {
 		v := &p.Versions[j]
 		v.Number = c.word(v.Number)
-		if len(v.deps) == 0 {
+		if v.deps == "" {
 			continue
 		}
-		c.key = c.key[:0]
-		for _, id := range v.deps {
-			c.key = binary.LittleEndian.AppendUint32(c.key, id)
-		}
-		ids, ok := c.lists[string(c.key)]
+		// The map's key and the version's field are the one string, so a distinct list keeps a single copy.
+		shared, ok := c.lists[v.deps]
 		if !ok {
-			ids = slices.Clone(v.deps)
-			c.lists[string(c.key)] = ids
+			c.lists[v.deps] = v.deps
+			continue
 		}
-		v.deps = ids
+		v.deps = shared
 	}
+}
+
+// categories is the one copy of a category list held for the listing; a listing repeats the same few lists.
+func (c *depCompactor) categories(cats []string) []string {
+	c.key = c.key[:0]
+	for _, cat := range cats {
+		c.key = binary.AppendUvarint(c.key, uint64(len(cat)))
+		c.key = append(c.key, cat...)
+	}
+	if shared, ok := c.cats[string(c.key)]; ok {
+		return shared
+	}
+	cats = append(make([]string, 0, len(cats)), cats...)
+	for i, cat := range cats {
+		cats[i] = c.word(cat)
+	}
+	c.cats[string(c.key)] = cats
+	return cats
 }
 
 // known reports whether every dependency index a version holds has a name.
 func (c *depCompactor) known() bool {
-	for _, ids := range c.lists {
-		for _, id := range ids {
-			if int(id) >= len(c.tab.names) {
-				return false
-			}
-		}
+	ok := true
+	for deps := range c.lists {
+		eachID(deps, func(id uint32) { ok = ok && int(id) < len(c.tab.names) })
 	}
-	return true
+	return ok
+}
+
+// encodeIDs is deps as the varints Version holds, each index one varint.
+func encodeIDs(deps []uint32) string {
+	if len(deps) == 0 {
+		return ""
+	}
+	out := make([]byte, 0, len(deps)*2)
+	for _, id := range deps {
+		out = binary.AppendUvarint(out, uint64(id))
+	}
+	return string(out)
+}
+
+// eachID calls fn with each names-table index enc holds, in order, reading the string in place.
+func eachID(enc string, fn func(uint32)) {
+	var id uint32
+	var shift uint
+	for i := 0; i < len(enc); i++ {
+		b := enc[i]
+		id |= uint32(b&0x7f) << shift
+		if b < 0x80 {
+			fn(id)
+			id, shift = 0, 0
+			continue
+		}
+		shift += 7
+	}
+}
+
+// decodeIDs is the indexes enc holds; nil when it holds none.
+func decodeIDs(enc string) []uint32 {
+	if enc == "" {
+		return nil
+	}
+	out := make([]uint32, 0, len(enc)/2+1)
+	eachID(enc, func(id uint32) { out = append(out, id) })
+	return out
 }
 
 func expectArray(dec *json.Decoder) error {
@@ -166,7 +216,10 @@ func readPackages(path string) ([]Package, error) {
 	if !c.known() {
 		return nil, errors.New("the listing names a dependency it does not hold")
 	}
-	return dedupeIDs(pk), nil
+	// append's doubling leaves a backing array up to twice the listing's length, and the collector keeps the whole
+	// allocation for as long as the memo holds the slice: a large community's packages are hundreds of bytes each, so
+	// the spare tail is megabytes.
+	return slices.Clone(dedupeIDs(pk)), nil
 }
 
 // EachStored hands fn each package of the stored listing at path in turn, keeping none of them; Dependencies of

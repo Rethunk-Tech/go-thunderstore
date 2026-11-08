@@ -6,6 +6,10 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A memoised listing keeps each dependency list once as a run of varints and shares repeated category lists, about a quarter less memory held for `Client.Index`'s idle window. The stored file and every answer are unchanged.
+
 ## [0.4.0] - 2026-11-07
 
 ### Added

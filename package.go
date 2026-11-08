@@ -18,8 +18,9 @@ type Version struct {
 	Size   int64
 	// Created is when the version was published, as Unix seconds; 0 when the site gave no readable date.
 	Created int64
-	// deps indexes the listing's dependency names; Package.Dependencies resolves them.
-	deps []uint32
+	// deps is the names-table indexes this version depends on, as varints; Package.Dependencies resolves them. Every
+	// version with the same dependency list shares one string, so a listing holds each list once.
+	deps string
 }
 
 type storedVersion struct {
@@ -31,7 +32,7 @@ type storedVersion struct {
 
 // MarshalJSON writes the compact form the stored listing uses.
 func (v Version) MarshalJSON() ([]byte, error) {
-	return json.Marshal(storedVersion{v.Number, v.Size, v.Created, v.deps})
+	return json.Marshal(storedVersion{v.Number, v.Size, v.Created, decodeIDs(v.deps)})
 }
 
 // UnmarshalJSON reads the compact form the stored listing uses.
@@ -40,7 +41,7 @@ func (v *Version) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return err
 	}
-	*v = Version{s.Number, s.Size, s.Created, s.Deps}
+	*v = Version{s.Number, s.Size, s.Created, encodeIDs(s.Deps)}
 	return nil
 }
 
@@ -74,13 +75,11 @@ func (p Package) ID() string { return packageID(p.Owner, p.Name) }
 // Dependencies is the "Owner-Name-1.2.3" strings one of p's versions depends on. A package decoded by Client.Each or
 // Client.Find carries none: only an Index holds the names.
 func (p Package) Dependencies(v Version) []string {
-	if len(v.deps) == 0 || p.tab == nil {
+	if v.deps == "" || p.tab == nil {
 		return nil
 	}
-	out := make([]string, len(v.deps))
-	for i, id := range v.deps {
-		out[i] = p.tab.names[id]
-	}
+	out := make([]string, 0, len(v.deps)/2+1)
+	eachID(v.deps, func(id uint32) { out = append(out, p.tab.names[id]) })
 	return out
 }
 
