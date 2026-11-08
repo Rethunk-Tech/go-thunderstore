@@ -6,6 +6,8 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-08
+
 ### Changed
 
 - A memoised listing keeps each dependency list once as a run of varints and shares repeated category lists, about a quarter less memory held for `Client.Index`'s idle window. The stored file and every answer are unchanged.
@@ -79,7 +81,8 @@ Notable changes to `go-thunderstore`. The format follows
 - `CDNs`, `OnHost` and `CDNOrder` order Thunderstore's download hosts.
 - `ParseManifest` reads a package's `manifest.json`, BOM included.
 
-[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.0...v0.3.1
