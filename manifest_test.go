@@ -31,12 +31,12 @@ func FuzzParseManifest(f *testing.F) {
 			return
 		}
 		// encoding/json replaces each invalid UTF-8 byte with U+FFFD (3 bytes).
-		max := 3 * len(b)
-		if len(m.Name) > max || len(m.Version) > max || len(m.Namespace) > max || len(m.Author) > max {
+		bound := 3 * len(b)
+		if len(m.Name) > bound || len(m.Version) > bound || len(m.Namespace) > bound || len(m.Author) > bound {
 			t.Fatalf("unbounded field from %q: %+v", b, m)
 		}
 		for _, d := range m.Dependencies {
-			if len(d) > max {
+			if len(d) > bound {
 				t.Fatalf("unbounded dependency %q from %q", d, b)
 			}
 		}
