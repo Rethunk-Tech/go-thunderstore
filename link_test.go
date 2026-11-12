@@ -23,22 +23,39 @@ func TestParseLink(t *testing.T) {
 }
 
 func FuzzParseLink(f *testing.F) {
-	f.Add("ror2mm://v1/install/thunderstore.io/Ns/Name/1.2.3/")
-	f.Add("ror2mm://v1/install/thunderstore.io/../x/1.0.0/")
-	f.Add("ror2mm://v1/install/thunderstore.io/a/b/c/")
-	f.Add("")
+	for _, raw := range []string{
+		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/",
+		"ror2mm://v1/install/thunderstore.io/Ns/Name/1.2.3/",
+		"https://thunderstore.io/x",
+		"ror2mm://v2/install/thunderstore.io/A/B/1.0.0/",
+		"ror2mm://v1/install/evil.io/A/B/1.0.0/",
+		"ror2mm://v1/install/thunderstore.io/A/B/latest/",
+		"ror2mm://v1/install/thunderstore.io/A/../1.0.0/",
+		"ror2mm://v1/install/thunderstore.io/A/B/1.0.0/?x=1",
+		"ror2mm://u@v1/install/thunderstore.io/A/B/1.0.0/",
+		"ror2mm://v1/install/thunderstore.io/../x/1.0.0/",
+		"ror2mm://v1/install/thunderstore.io/a/b/c/",
+		"",
+	} {
+		f.Add(raw)
+	}
 	f.Fuzz(func(t *testing.T, raw string) {
 		ref, err := ParseLink(raw)
 		if err != nil {
 			return
 		}
-		for _, s := range []string{ref.Namespace, ref.Name} {
-			if !part.MatchString(s) {
-				t.Fatalf("bad part %q from %q", s, raw)
+		for _, s := range []string{ref.Namespace, ref.Name, ref.Version} {
+			if !strings.Contains(raw, s) {
+				t.Fatalf("unbounded field %q from %q", s, raw)
 			}
 		}
-		if !versionRe.MatchString(ref.Version) || strings.Contains(ref.Namespace+ref.Name, "/") {
+		if !part.MatchString(ref.Namespace) || !part.MatchString(ref.Name) || !versionRe.MatchString(ref.Version) {
 			t.Fatalf("bad ref %+v from %q", ref, raw)
+		}
+		again := Scheme + "://v1/install/thunderstore.io/" + ref.Namespace + "/" + ref.Name + "/" + ref.Version + "/"
+		got, err := ParseLink(again)
+		if err != nil || got != ref {
+			t.Fatalf("round-trip %+v from %q: %+v %v", ref, raw, got, err)
 		}
 	})
 }

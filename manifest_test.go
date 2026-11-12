@@ -2,6 +2,7 @@ package thunderstore
 
 import (
 	"bytes"
+	"encoding/json"
 	"slices"
 	"testing"
 )
@@ -19,12 +20,35 @@ func TestParseManifestAcceptsABOM(t *testing.T) {
 
 // A parse that succeeds on a BOM-prefixed input succeeds on the bare one with the same result.
 func FuzzParseManifest(f *testing.F) {
+	f.Add([]byte("\xef\xbb\xbf" + `{"name":"Mod","version_number":"1.2.3","namespace":"Ns","author":"Au","dependencies":["BepInEx-BepInExPack-5.4.2100"]}`))
 	f.Add([]byte("\xef\xbb\xbf" + `{"name":"Mod","version_number":"1.2.3","dependencies":["Ns-Lib-1.0.0"]}`))
+	f.Add([]byte(`{"dependencies":"x"}`))
 	f.Add([]byte(`{"dependencies":"Ns-Lib-1.0.0"}`))
 	f.Add([]byte(``))
 	f.Fuzz(func(t *testing.T, b []byte) {
 		m, err := ParseManifest(b)
-		if err != nil || bytes.HasPrefix(b, []byte("\xef\xbb\xbf")) {
+		if err != nil {
+			return
+		}
+		// encoding/json replaces each invalid UTF-8 byte with U+FFFD (3 bytes).
+		max := 3 * len(b)
+		if len(m.Name) > max || len(m.Version) > max || len(m.Namespace) > max || len(m.Author) > max {
+			t.Fatalf("unbounded field from %q: %+v", b, m)
+		}
+		for _, d := range m.Dependencies {
+			if len(d) > max {
+				t.Fatalf("unbounded dependency %q from %q", d, b)
+			}
+		}
+		enc, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rt, err := ParseManifest(enc)
+		if err != nil || rt.Name != m.Name || rt.Version != m.Version || rt.Namespace != m.Namespace || rt.Author != m.Author || !slices.Equal(rt.Dependencies, m.Dependencies) {
+			t.Fatalf("round-trip %+v from %q: %+v %v", m, b, rt, err)
+		}
+		if bytes.HasPrefix(b, []byte("\xef\xbb\xbf")) {
 			return
 		}
 		again, err := ParseManifest(append([]byte("\xef\xbb\xbf"), b...))

@@ -101,3 +101,40 @@ func TestParseDependency(t *testing.T) {
 		}
 	}
 }
+
+func FuzzParseDependency(f *testing.F) {
+	for _, in := range []string{
+		"BepInEx-BepInExPack-5.4.2100",
+		"Ab_c1-My_Mod_2-0.1.0-beta.1",
+		"x-y-1.0.0",
+		"a-b-c-1.0.0",
+		"Team-Name-../../x?y",
+		"Te/am-Name-1.0.0",
+		"Team-Na.me-1.0.0",
+		"-Name-1.0.0",
+		"NS--1.0.0",
+		"NS-Name-",
+		"NS-1.0.0",
+		"plain",
+		"",
+		"Ab_c1-My_Mod_2-10.20.30",
+	} {
+		f.Add(in)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		d, err := ParseDependency(s)
+		if err != nil {
+			return
+		}
+		if !part.MatchString(d.Namespace) || !part.MatchString(d.Name) || !versionRe.MatchString(d.Version) {
+			t.Fatalf("bad dependency %+v from %q", d, s)
+		}
+		if d.String() != s {
+			t.Fatalf("unbounded or rearranged %+v from %q: %q", d, s, d.String())
+		}
+		got, err := ParseDependency(d.String())
+		if err != nil || got != d {
+			t.Fatalf("round-trip %+v from %q: %+v %v", d, s, got, err)
+		}
+	})
+}
