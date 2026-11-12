@@ -43,7 +43,7 @@ jobs:
       # Pinned rather than floating: a gate release that changes detection must not change this
       # repository's verdict without a commit here.
       - name: Install gate
-        run: go install github.com/Rethunk-Tech/rethunk-gate-cli/cmd/gate@v0.6.9
+        run: go install github.com/Rethunk-Tech/rethunk-gate-cli/cmd/gate@v0.7.0
 
       - name: Gate
         run: gate --timeout 15m

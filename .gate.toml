@@ -5,11 +5,18 @@
 # checks never executed. Each override below runs the module's own pinned binary
 # through `go tool`, or the checksummed download for actionlint, which is not a
 # module.
+# Builds the pinned lint and vuln binaries once, so the gates that need them
+# never race each other's cold `go tool` link.
+[gates.tools]
+run = "go tool -n golangci-lint >/dev/null && go tool -n govulncheck >/dev/null"
+
 [gates.lint]
 run = "go tool golangci-lint run --allow-parallel-runners ./..."
+needs = ["tools"]
 
 [gates.vuln]
 run = "go tool govulncheck ./..."
+needs = ["tools"]
 
 # No-op in CI, like gitleaks: the pre-push hook already ran this gate on every pushed commit, and a runner's
 # download of the pinned binary fails the whole run whenever GitHub release downloads answer 504.
@@ -21,6 +28,7 @@ run = '[ -n "$CI" ] || ./scripts/actionlint'
 # than a rewrite: a gate that rewrites the tree passes on a file nobody saw.
 [gates.fmt]
 run = "go tool golangci-lint fmt --diff ./..."
+needs = ["tools"]
 
 # Compiles the module and its tests for Windows, where a build-tagged file can
 # break without any Linux check noticing.
