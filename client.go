@@ -547,6 +547,9 @@ func (c *Client) build(ctx context.Context, chunks []string, path string) error 
 				return err
 			}
 		}
+		if first {
+			return errors.New("the index lists no packages")
+		}
 		if err := bw.WriteByte(']'); err != nil {
 			return err
 		}

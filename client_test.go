@@ -440,3 +440,15 @@ func TestABuildKeepsASiblingCommunitysListing(t *testing.T) {
 		t.Fatalf("the build removed a sibling community's listing: %v", err)
 	}
 }
+
+func TestAnIndexWithNoPackagesStoresNothing(t *testing.T) {
+	f := newFake(t)
+	f.chunk0, f.chunk1 = []map[string]any{}, []map[string]any{}
+	c := f.client(t, nil)
+	if _, err := c.Index(t.Context(), community); err == nil {
+		t.Fatal("stored a listing with no packages")
+	}
+	if ents, _ := os.ReadDir(c.dir()); len(ents) != 0 {
+		t.Fatalf("left %d files behind", len(ents))
+	}
+}
