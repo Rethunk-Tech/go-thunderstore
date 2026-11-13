@@ -2,6 +2,8 @@ package thunderstore
 
 import (
 	"crypto/md5" // #nosec G501 -- checks the Content-MD5 the upload sends
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -126,6 +128,38 @@ func TestUploaderDoesNotFollowADowngradeWithTheToken(t *testing.T) {
 	err := NewUploader(tls.Client(), tls.URL, "secret").call(t.Context(), "p/", map[string]any{}, nil)
 	if err == nil || leaked {
 		t.Fatalf("err = %v, request reached the plain-http server = %v", err, leaked)
+	}
+}
+
+func TestUploaderDoesNotFollowAPartRedirectOffTheStorageHost(t *testing.T) {
+	pkg := filepath.Join(t.TempDir(), "a.zip")
+	if err := safefs.WriteFile(pkg, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stolen := false
+	thief := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		stolen = len(body) > 0
+	}))
+	defer thief.Close()
+	var store *httptest.Server
+	store = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			http.Redirect(w, r, thief.URL+"/steal", http.StatusTemporaryRedirect)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/initiate-upload/") {
+			_, _ = fmt.Fprintf(w, `{"user_media":{"uuid":"12345678-1234-1234-1234-123456789012"},"upload_urls":[{"part_number":1,"url":"%s/part/1","offset":0,"length":10}]}`, store.URL)
+		}
+	}))
+	defer store.Close()
+	pool := x509.NewCertPool()
+	pool.AddCert(store.Certificate())
+	pool.AddCert(thief.Certificate())
+	hc := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	_, err := NewUploader(hc, store.URL, "tok").Upload(t.Context(), pkg)
+	if err == nil || stolen {
+		t.Fatalf("err = %v, zip reached the other host = %v", err, stolen)
 	}
 }
 

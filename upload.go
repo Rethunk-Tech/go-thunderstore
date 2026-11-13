@@ -89,8 +89,21 @@ func NewUploader(client *http.Client, site, token string) *Uploader {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	client = httpkit.WithRedirect(client, httpkit.NoDowngrade)
-	return &Uploader{client: client, site: strings.TrimRight(site, "/") + "/", token: token}
+	u := &Uploader{site: strings.TrimRight(site, "/") + "/", token: token}
+	u.client = httpkit.WithRedirect(client, u.checkRedirect)
+	return u
+}
+
+// checkRedirect keeps every hop on the host the first request named, so a storage endpoint cannot 307/308 the zip
+// (Go keeps PUT and the body on those) to a host checkStorage never accepted.
+func (u *Uploader) checkRedirect(req *http.Request, via []*http.Request) error {
+	if err := httpkit.NoDowngrade(req, via); err != nil {
+		return err
+	}
+	if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+		return fmt.Errorf("thunderstore: upload redirect to %s refused", req.URL.Host)
+	}
+	return nil
 }
 
 // AllowStorageHosts restricts where the zip may be sent to the named hostnames (no port). Thunderstore deployments
