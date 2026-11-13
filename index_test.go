@@ -109,6 +109,15 @@ func TestVersionNumbersSortNewestFirst(t *testing.T) {
 	}
 }
 
+func TestVersionNumbersPutUnparseableLast(t *testing.T) {
+	t.Parallel()
+	p := Package{Versions: []Version{{Number: "1.0.0"}, {Number: "junk"}, {Number: "2.0.0"}, {Number: "1.5.0"}}}
+	got := p.VersionNumbers()
+	if want := []string{"2.0.0", "1.5.0", "1.0.0", "junk"}; !slices.Equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
 // listingBody is a stored listing of pkgs packages, each with one version that names the next deps dependency names of
 // a table every file carries; withDeps false omits the dependency lists.
 func listingBody(pkgs, deps int, withDeps bool) string {

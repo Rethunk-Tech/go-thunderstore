@@ -90,10 +90,16 @@ func (p Package) VersionNumbers() []string {
 		out[i] = v.Number
 	}
 	slices.SortStableFunc(out, func(a, b string) int {
+		if c, ok := semverish.Compare(b, a); ok {
+			return c
+		}
+		// A number that does not parse sorts after every one that does, so the order stays total.
+		_, okA := semverish.Parse(a)
+		_, okB := semverish.Parse(b)
 		switch {
-		case newer(a, b):
+		case okA && !okB:
 			return -1
-		case newer(b, a):
+		case okB && !okA:
 			return 1
 		}
 		return 0
@@ -108,12 +114,6 @@ func (p Package) Outranks(q Package) bool {
 }
 
 func packageID(owner, name string) string { return strings.ToLower(owner + "-" + name) }
-
-// newer reports whether a is a later version than b; either failing to parse means not newer.
-func newer(a, b string) bool {
-	c, ok := semverish.Compare(a, b)
-	return ok && c > 0
-}
 
 // wirePackage is a v1 package listing as the site serves it.
 type wirePackage struct {
