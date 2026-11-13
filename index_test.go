@@ -237,6 +237,18 @@ func TestGitHubRepoReadsOnlyRepositoryAddresses(t *testing.T) {
 	}
 }
 
+func TestSlimKeepsEveryVersion(t *testing.T) {
+	t.Parallel()
+	var w wirePackage
+	if err := json.Unmarshal([]byte(`{"owner":"A","name":"B","versions":[{"version_number":"2.0.0"},{"version_number":"1.0.0"}]}`), &w); err != nil {
+		t.Fatal(err)
+	}
+	p := slim(&w, &depNames{index: map[string]uint32{}})
+	if len(p.Versions) != 2 {
+		t.Fatalf("versions = %d, want 2", len(p.Versions))
+	}
+}
+
 func FuzzIndexChunkDecode(f *testing.F) {
 	f.Add([]byte(`[]`))
 	f.Add([]byte(`[{"name":"a","owner":"b","versions":[{"version_number":"1.0.0","dependencies":["x-y-1.0.0"]}]}]`))
@@ -253,7 +265,7 @@ func FuzzIndexChunkDecode(f *testing.F) {
 				continue
 			}
 			p := slim(&pk[i], &names)
-			if p.ID() == "" && len(p.Versions) != len(pk[i].Versions) {
+			if len(p.Versions) != len(pk[i].Versions) {
 				t.Fatalf("versions lost from %q", b)
 			}
 		}
