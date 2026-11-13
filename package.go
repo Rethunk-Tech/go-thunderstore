@@ -204,13 +204,21 @@ func ParseDependency(s string) (Dependency, error) {
 	ns, rest, ok := strings.Cut(s, "-")
 	name, version, found := strings.CutLast(rest, "-")
 	if !ok || !found {
-		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", s)
+		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", truncate(s))
 	}
 	d := Dependency{Namespace: ns, Name: name, Version: version}
 	if !part.MatchString(d.Namespace) || !part.MatchString(d.Name) || !versionRe.MatchString(d.Version) {
-		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", s)
+		return Dependency{}, fmt.Errorf("%q is not a Namespace-Name-Version dependency", truncate(s))
 	}
 	return d, nil
+}
+
+func truncate(s string) string {
+	const max = 80
+	if len(s) <= max {
+		return s
+	}
+	return strings.ToValidUTF8(s[:max], "") + "..."
 }
 
 // String is the "Namespace-Name-Version" form ParseDependency reads.

@@ -1,6 +1,7 @@
 package thunderstore
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -137,4 +138,12 @@ func FuzzParseDependency(f *testing.F) {
 			t.Fatalf("round-trip %+v from %q: %+v %v", d, s, got, err)
 		}
 	})
+}
+
+func TestParseDependencyErrorTruncatesInput(t *testing.T) {
+	t.Parallel()
+	_, err := ParseDependency(string(bytes.Repeat([]byte("x"), 100000)))
+	if err == nil || len(err.Error()) > 200 {
+		t.Fatalf("err length = %d, want a short error", len(err.Error()))
+	}
 }
