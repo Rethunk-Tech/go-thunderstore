@@ -223,16 +223,13 @@ func (c *Client) Stored(_ context.Context, community string, fn func(*Package)) 
 	if !communityKey.MatchString(community) {
 		return false, fmt.Errorf("%q is not a Thunderstore community key", community)
 	}
-	c.mu.Lock()
-	m, held := c.memo[community]
-	c.mu.Unlock()
-	if held {
-		m.idx.Each(fn)
-		return true, nil
-	}
 	path, ok := c.storedPath(community)
 	if !ok {
 		return false, nil
+	}
+	if x, held := c.memoized(community, path); held {
+		x.Each(fn)
+		return true, nil
 	}
 	return true, EachStored(path, fn)
 }

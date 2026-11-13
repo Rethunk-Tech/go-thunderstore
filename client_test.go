@@ -100,6 +100,16 @@ func TestChangedIndexIsServedStaleThenAnnounced(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the refresh that changed the listing was not announced")
 	}
+	n, saw := 0, false
+	ok, err := c.Stored(t.Context(), community, func(p *Package) {
+		n++
+		if p.Owner == "Zed" && p.Name == "NewOne" {
+			saw = true
+		}
+	})
+	if err != nil || !ok || n != 4 || !saw {
+		t.Fatalf("Stored after refresh: n %d saw %v err %v", n, saw, err)
+	}
 	if x, err := c.Index(t.Context(), community); err != nil || len(x.Packages()) != 4 {
 		t.Fatalf("after the refresh: %v", err)
 	}
