@@ -222,6 +222,23 @@ func TestBuiltHandsOverTheStoredListing(t *testing.T) {
 	}
 }
 
+func TestBuiltRunsOnlyWhenTheListingIsNewlyStored(t *testing.T) {
+	f := newFake(t)
+	var n atomic.Int32
+	c := f.client(t, func(cfg *Config) { cfg.Built = func(string, string) { n.Add(1) } })
+	if _, err := c.Index(t.Context(), community); err != nil {
+		t.Fatal(err)
+	}
+	if n.Load() != 1 {
+		t.Fatalf("first store: Built %d", n.Load())
+	}
+	c.Refresh(community)
+	c.Wait()
+	if n.Load() != 1 {
+		t.Fatalf("unchanged refresh: Built %d", n.Load())
+	}
+}
+
 func TestEachAndFindLeaveNoListingInMemory(t *testing.T) {
 	f := newFake(t)
 	c := f.client(t, nil)

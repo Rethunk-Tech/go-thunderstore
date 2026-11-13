@@ -500,6 +500,9 @@ func (c *Client) buildListing(ctx context.Context, community string) (string, er
 		if err := c.build(ctx, chunks, path); err != nil {
 			return "", err
 		}
+		if c.cfg.Built != nil {
+			c.cfg.Built(community, path)
+		}
 	}
 	dropOtherListings(dir, community, path)
 	nm, err := json.Marshal(cacheMeta{Hash: hash, Fetched: c.now()})
@@ -510,9 +513,6 @@ func (c *Client) buildListing(ctx context.Context, community string) (string, er
 		return "", err
 	}
 	c.refreshSide(community, hash, path)
-	if c.cfg.Built != nil {
-		c.cfg.Built(community, path)
-	}
 	return path, nil
 }
 
