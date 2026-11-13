@@ -6,6 +6,7 @@ import (
 	"crypto/md5" // #nosec G501 -- S3's Content-MD5 integrity header
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -245,7 +246,11 @@ func (u *Uploader) putPart(ctx context.Context, data []byte, part uploadPart) (s
 	req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(sum[:]))
 	res, err := u.client.Do(req)
 	if err != nil {
-		return "", err
+		// *url.Error carries the presigned URL, whose query is a credential.
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			err = ue.Err
+		}
+		return "", fmt.Errorf("uploading part %d: %w", part.PartNumber, err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode >= http.StatusBadRequest {

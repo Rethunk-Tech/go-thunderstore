@@ -202,3 +202,13 @@ func TestUploaderChecksWhereTheSiteSendsTheZip(t *testing.T) {
 		}
 	}
 }
+
+func TestPutPartErrorHidesSignedURL(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+	up := NewUploader(nil, srv.URL, "")
+	_, err := up.putPart(t.Context(), []byte("abc"), uploadPart{PartNumber: 1, Length: 3, URL: srv.URL + "/p?X-Amz-Signature=SECRET"})
+	if err == nil || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("err = %v, want a failure without the signed URL", err)
+	}
+}
