@@ -214,11 +214,11 @@ func ParseDependency(s string) (Dependency, error) {
 }
 
 func truncate(s string) string {
-	const max = 80
-	if len(s) <= max {
+	const limit = 80
+	if len(s) <= limit {
 		return s
 	}
-	return strings.ToValidUTF8(s[:max], "") + "..."
+	return strings.ToValidUTF8(s[:limit], "") + "..."
 }
 
 // String is the "Namespace-Name-Version" form ParseDependency reads.
