@@ -44,10 +44,10 @@ github.com/Rethunk-Tech/go-desktopenv v0.9.1 h1:1VUkePShCoBSBH3FGz5E4FpEj1IG9hfj
 github.com/Rethunk-Tech/go-desktopenv v0.9.1/go.mod h1:Hr0/FZV8xWHGtSEIDrI+NwdpyTn43B2LWqrh+POcHik=
 github.com/Rethunk-Tech/go-github v0.3.0 h1:NtD3gOa8pEepXmZXBhn4WC0Rdh8moDNeGcQqzEBU3MY=
 github.com/Rethunk-Tech/go-github v0.3.0/go.mod h1:pmxPJZQR+Tp0Cy9j3HoHYRst/mmrsF7WRu5G6XSFz+g=
-github.com/Rethunk-Tech/go-httpkit v0.3.0 h1:WifczPJg6anrZ+LTr0UwqnxihJnZIdgm6A+n6d6Uj54=
-github.com/Rethunk-Tech/go-httpkit v0.3.0/go.mod h1:qJZZfD+ejjWm6LwjEXGAUOKEjak1Nx6W3vuZloeZBLM=
-github.com/Rethunk-Tech/go-safefs v0.9.0 h1:8N3h1QCeRDL/xK4ZjG11Fj/rr0KL5eKS0D+KKTaTNkA=
-github.com/Rethunk-Tech/go-safefs v0.9.0/go.mod h1:au7iteKy+uWtmmbGw58R46RJ6tVmcTMeKFLSDyhFZdw=
+github.com/Rethunk-Tech/go-httpkit v0.3.1 h1:TEMOQ488ENSWf4wAGtBkfIyWxUDrtcsM0WOTuRg0abM=
+github.com/Rethunk-Tech/go-httpkit v0.3.1/go.mod h1:VSo/w8IjHfEn+3P6OW/9513buuzPpWHE7aBbcm8FiJ0=
+github.com/Rethunk-Tech/go-safefs v0.9.1 h1:HfiNmSu4IGQVjDTTGeLOqCl4Xs45gyUcHKX+5PznJ18=
+github.com/Rethunk-Tech/go-safefs v0.9.1/go.mod h1:Kr+UKsuC4mKE4Ec986hwHqqOSz2JqYDdQil10zlQMhw=
 github.com/Rethunk-Tech/go-semverish v0.3.0 h1:9jo7H1hygsn73axSLqBzaqEOFwUIy2jsEzPQbASmVQg=
 github.com/Rethunk-Tech/go-semverish v0.3.0/go.mod h1:kQlWmKADgyXvAH8N1BfyFiYhWBpSj1wvWRRYIItnWbg=
 github.com/alecthomas/assert/v2 v2.11.0 h1:2Q9r3ki8+JYXvGsDyBXwH3LcJ+WK5D0gc5E8vS6K3D0=
