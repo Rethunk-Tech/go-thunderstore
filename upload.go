@@ -264,7 +264,7 @@ func (u *Uploader) putPart(ctx context.Context, data []byte, part uploadPart) (s
 }
 
 // Submit publishes the upload uuid under team in community, filed under categories, and returns the package's page
-// URL in that community, or "" when the site names none.
+// URL in that community, or "" when the site names none or names one that is not an http(s) address.
 func (u *Uploader) Submit(ctx context.Context, uuid, team, community string, categories []string) (string, error) {
 	var done struct {
 		AvailableCommunities []struct {
@@ -285,7 +285,7 @@ func (u *Uploader) Submit(ctx context.Context, uuid, team, community string, cat
 	if len(done.AvailableCommunities) == 0 {
 		return "", nil
 	}
-	return done.AvailableCommunities[0].URL, nil
+	return webLink(done.AvailableCommunities[0].URL), nil
 }
 
 // storageURL is an address the site handed out to upload bytes to. The file must not cross the internet in the clear:

@@ -73,6 +73,18 @@ func TestUploaderFollowsTheCLIProtocol(t *testing.T) {
 	}
 }
 
+func TestSubmitRefusesANonHTTPPageURL(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"available_communities":[{"url":"javascript:alert(1)"}]}`))
+	}))
+	defer srv.Close()
+	page, err := NewUploader(srv.Client(), srv.URL, "tok").Submit(t.Context(), "12345678-1234-1234-1234-123456789012", "Ab", "lethal-company", nil)
+	if err != nil || page != "" {
+		t.Fatalf("submit = %q, %v, want no page and no error", page, err)
+	}
+}
+
 func TestUploaderRefusesAnHTTPPartURL(t *testing.T) {
 	t.Parallel()
 	up := NewUploader(nil, "https://thunderstore.io/", "")
