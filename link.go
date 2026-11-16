@@ -2,7 +2,6 @@ package thunderstore
 
 import (
 	"errors"
-	"net/url"
 	"regexp"
 	"strings"
 )
@@ -22,17 +21,17 @@ var (
 )
 
 // ParseLink reads ror2mm://v1/install/thunderstore.io/<namespace>/<name>/<version>/. Namespace and name are
-// letters, digits and underscores, the version is three dot-separated numbers; anything else, including a query,
-// fragment or userinfo, is refused.
+// letters, digits and underscores, the version is three dot-separated numbers; anything else, including a percent
+// escape, a query, a fragment or userinfo, is refused.
 func ParseLink(raw string) (Ref, error) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != Scheme || u.Host != "v1" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	scheme, rest, ok := strings.Cut(raw, "://")
+	if !ok || !strings.EqualFold(scheme, Scheme) {
 		return Ref{}, errBadLink
 	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) != 5 || parts[0] != "install" || parts[1] != "thunderstore.io" ||
-		!part.MatchString(parts[2]) || !part.MatchString(parts[3]) || !versionRe.MatchString(parts[4]) {
+	parts := strings.Split(strings.TrimSuffix(rest, "/"), "/")
+	if len(parts) != 6 || parts[0] != "v1" || parts[1] != "install" || parts[2] != "thunderstore.io" ||
+		!part.MatchString(parts[3]) || !part.MatchString(parts[4]) || !versionRe.MatchString(parts[5]) {
 		return Ref{}, errBadLink
 	}
-	return Ref{Namespace: parts[2], Name: parts[3], Version: parts[4]}, nil
+	return Ref{Namespace: parts[3], Name: parts[4], Version: parts[5]}, nil
 }

@@ -22,6 +22,26 @@ func TestParseLink(t *testing.T) {
 	}
 }
 
+func TestParseLinkRefusesEscapesQueryAndFragment(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{
+		"ror2mm://v1/install/thunderstore.io/Alice/More%43ompany/2.0.0/",
+		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/1%2e0%2e0/",
+		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/?",
+		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/#",
+		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/?x=1",
+		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/#frag",
+		"ror2mm://u@v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/",
+	} {
+		if ref, err := ParseLink(raw); err == nil {
+			t.Fatalf("%q gave %+v", raw, ref)
+		}
+	}
+	if ref, err := ParseLink("ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/"); err != nil || ref.Name != "MoreCompany" || ref.Version != "2.0.0" {
+		t.Fatalf("plain link: %+v %v", ref, err)
+	}
+}
+
 func FuzzParseLink(f *testing.F) {
 	for _, raw := range []string{
 		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/",
@@ -35,6 +55,10 @@ func FuzzParseLink(f *testing.F) {
 		"ror2mm://u@v1/install/thunderstore.io/A/B/1.0.0/",
 		"ror2mm://v1/install/thunderstore.io/../x/1.0.0/",
 		"ror2mm://v1/install/thunderstore.io/a/b/c/",
+		"ror2mm://v1/install/thunderstore.io/Alice/More%43ompany/2.0.0/",
+		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/1%2e0%2e0/",
+		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/?",
+		"ror2mm://v1/install/thunderstore.io/Alice/MoreCompany/2.0.0/#",
 		"",
 	} {
 		f.Add(raw)
