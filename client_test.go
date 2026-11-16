@@ -176,6 +176,29 @@ func TestAGzipBombIsBoundedByMaxUnpacked(t *testing.T) {
 	}
 }
 
+func TestACorruptGzipChunkIsAnError(t *testing.T) {
+	t.Parallel()
+	good := gz(t, []map[string]any{{"name": "Mod", "owner": "Alice"}})
+	badCRC := slices.Clone(good)
+	badCRC[len(badCRC)-8] ^= 0xff
+	for name, body := range map[string][]byte{
+		"footer stripped": good[:len(good)-8],
+		"bad crc":         badCRC,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+			defer srv.Close()
+			c, _ := New(Config{CacheDir: t.TempDir()})
+			n := 0
+			err := c.streamPackages(t.Context(), srv.URL, func(*wirePackage) error { n++; return nil })
+			if err == nil || n != 1 {
+				t.Fatalf("packages %d, err %v", n, err)
+			}
+		})
+	}
+}
+
 func TestABuildRemovesTheCommunitysOtherListings(t *testing.T) {
 	f := newFake(t)
 	c := f.client(t, nil)

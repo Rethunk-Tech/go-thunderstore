@@ -368,6 +368,7 @@ func (c *Client) streamPackages(ctx context.Context, url string, fn func(*wirePa
 		if err != nil {
 			return err
 		}
+		defer func() { _ = zr.Close() }()
 		r = safefs.CapReader(zr, c.maxUnpacked)
 	}
 	dec := json.NewDecoder(r)
@@ -384,7 +385,12 @@ func (c *Client) streamPackages(ctx context.Context, url string, fn func(*wirePa
 			return err
 		}
 	}
-	_, err = dec.Token()
+	if _, err := dec.Token(); err != nil {
+		return err
+	}
+	// The gzip trailer (CRC and unpacked length) is checked only at EOF, so a stream that ends after the array would
+	// otherwise pass with a truncated footer or a bad CRC.
+	_, err = io.Copy(io.Discard, r)
 	return err
 }
 
