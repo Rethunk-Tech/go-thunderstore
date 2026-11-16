@@ -30,6 +30,7 @@ jobs:
         uses: Rethunk-Tech/gh-actions/setup-go@71da648f666fb49a8e72d0576a4d8db97894ccaf # v1.29.1
         with:
           go-version-file: go.mod
+          run-govulncheck: "true"
 
       # Without this cache every pass re-checks every package. The key takes only the inputs
       # that touch every package, and the prefix restore-key keeps a changed key from starting cold.
