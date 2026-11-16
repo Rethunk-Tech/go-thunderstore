@@ -262,6 +262,80 @@ func TestBuiltRunsOnlyWhenTheListingIsNewlyStored(t *testing.T) {
 	}
 }
 
+// Built runs outside the community's build lock, so a callback reading the listing it was just told about must not wait
+// on that lock.
+func TestBuiltMayReadTheListingItWasToldAbout(t *testing.T) {
+	f := newFake(t)
+	var got int
+	var readErr error
+	var c *Client
+	c = f.client(t, func(cfg *Config) {
+		cfg.Built = func(key, _ string) {
+			x, err := c.Index(t.Context(), key)
+			if err != nil {
+				readErr = err
+				return
+			}
+			got = len(x.Packages())
+		}
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Index(t.Context(), community)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Index called from Built deadlocked on the build lock")
+	}
+	if readErr != nil || got != 3 {
+		t.Fatalf("Index from Built: %d packages, %v", got, readErr)
+	}
+}
+
+func TestAMetaWriteThatFailsKeepsThePreviousListing(t *testing.T) {
+	f := newFake(t)
+	now := time.Now()
+	c := f.client(t, func(cfg *Config) { cfg.Now = func() time.Time { return now } })
+	if _, err := c.ListingFile(t.Context(), community); err != nil {
+		t.Fatal(err)
+	}
+	old, ok := c.storedPath(community)
+	if !ok {
+		t.Fatal("no listing stored")
+	}
+	saved := filepath.Join(t.TempDir(), "meta.json")
+	if err := os.Rename(c.metaPath(community), saved); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the meta file goes makes WriteFileAtomic fail after the new listing is built.
+	if err := os.Mkdir(c.metaPath(community), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f.third.Store(true)
+	now = now.Add(2 * refreshAfter)
+	if _, err := c.buildListing(t.Context(), community); err == nil {
+		t.Fatal("the build reported success though it could not name its listing")
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("the listing the meta named was dropped before the new meta was written: %v", err)
+	}
+	if err := os.Remove(c.metaPath(community)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(saved, c.metaPath(community)); err != nil {
+		t.Fatal(err)
+	}
+	f.srv.Close()
+	if x, err := c.Index(t.Context(), community); err != nil || len(x.Packages()) != 3 {
+		t.Fatalf("offline Index after the failed meta write: %v", err)
+	}
+}
+
 func TestEachAndFindLeaveNoListingInMemory(t *testing.T) {
 	f := newFake(t)
 	c := f.client(t, nil)

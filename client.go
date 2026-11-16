@@ -67,8 +67,9 @@ type Config struct {
 	// Refreshed is told the community when a background refresh stored a changed listing. It runs on the refresh's
 	// goroutine.
 	Refreshed func(community string)
-	// Built is told the community and the path of each listing newly stored, before Index sees it; the path stays valid
-	// for EachStored until the next build replaces it. It runs on the build's goroutine.
+	// Built is told the community and the path of each listing newly stored; the path stays valid for EachStored until
+	// the next build replaces it. It runs on the build's goroutine, outside the per-community build lock, so it may
+	// read the listing it is told about.
 	Built func(community, path string)
 }
 
@@ -468,10 +469,24 @@ func listingOrTemp(rest string) bool {
 // buildListing is the community's stored listing, downloaded and built first when the stored one is older than
 // refreshAfter, kept when the site cannot be reached.
 func (c *Client) buildListing(ctx context.Context, community string) (string, error) {
-	// One build per community: a second caller waits, then finds the listing the first one wrote.
+	// One build per community: a second caller waits, then finds the listing the first one wrote. Built runs after the
+	// lock is released, since a callback that reads the listing would otherwise wait on the lock its own caller holds.
 	mu := c.buildLock(community)
 	mu.Lock()
-	defer mu.Unlock()
+	path, built, err := c.buildLocked(ctx, community)
+	mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	if built && c.cfg.Built != nil {
+		c.cfg.Built(community, path)
+	}
+	return path, nil
+}
+
+// buildLocked is buildListing's work under the community's build lock; built reports that path is a listing this call
+// wrote.
+func (c *Client) buildLocked(ctx context.Context, community string) (path string, built bool, err error) {
 	dir := c.dir()
 	meta := c.readMeta(community)
 	cached := func() (string, bool) {
@@ -480,46 +495,46 @@ func (c *Client) buildListing(ctx context.Context, community string) (string, er
 		return path, meta.Hash != "" && err == nil
 	}
 	if path, ok := cached(); ok && c.fresh(meta.Fetched) {
-		return path, nil
+		return path, false, nil
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+		return "", false, err
 	}
 	var chunks []string
 	hash, err := c.getJSON(ctx, c.indexURL(community), &chunks)
 	if err != nil {
 		if path, ok := cached(); ok {
-			return path, nil
+			return path, false, nil
 		}
-		return "", err
+		return "", false, err
 	}
 	if len(chunks) > maxChunks {
-		return "", fmt.Errorf("index lists %d chunks", len(chunks))
+		return "", false, fmt.Errorf("index lists %d chunks", len(chunks))
 	}
 	for _, u := range chunks {
 		if !c.chunkAllowed(u) {
-			return "", fmt.Errorf("index names a chunk outside Thunderstore: %s", u)
+			return "", false, fmt.Errorf("index names a chunk outside Thunderstore: %s", u)
 		}
 	}
-	path := listingPath(dir, community, hash)
+	path = listingPath(dir, community, hash)
 	if _, err := os.Stat(path); err != nil {
 		if err := c.build(ctx, chunks, path); err != nil {
-			return "", err
+			return "", false, err
 		}
-		if c.cfg.Built != nil {
-			c.cfg.Built(community, path)
-		}
+		built = true
 	}
-	dropOtherListings(dir, community, path)
 	nm, err := json.Marshal(cacheMeta{Hash: hash, Fetched: c.now()})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
+	// The meta file is what names the listing to every later read: dropping the old ones first would leave an offline
+	// reader with nothing.
 	if err := safefs.WriteFileAtomic(c.metaPath(community), nm, 0o644); err != nil {
-		return "", err
+		return "", false, err
 	}
+	dropOtherListings(dir, community, path)
 	c.refreshSide(community, hash, path)
-	return path, nil
+	return path, built, nil
 }
 
 // build downloads every chunk and writes the slimmed listing to path as it goes, so neither a chunk nor the whole
