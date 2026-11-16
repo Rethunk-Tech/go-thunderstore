@@ -83,3 +83,12 @@ func TestCDNOrder(t *testing.T) {
 		t.Error("an address off the CDNs was given alternatives")
 	}
 }
+
+func TestOnHostRefusesNonHTTPAddresses(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd", "/relative/path"} {
+		if got, ok := OnHost(raw, "https://ccdn.thunderstore.io"); ok {
+			t.Errorf("OnHost(%q) = %q, want it refused", raw, got)
+		}
+	}
+}

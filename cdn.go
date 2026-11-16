@@ -12,11 +12,12 @@ var CDNs = []string{
 	"https://hcdn-1.hcdn.thunderstore.io",
 }
 
-// OnHost is raw with its scheme and host replaced by those of base, the same path and query.
+// OnHost is raw with its scheme and host replaced by those of base, the same path and query. Only an absolute http or
+// https address is rewritten: any other scheme would land on base's host with the original opaque part, off the site.
 func OnHost(raw, base string) (string, bool) {
 	u, err := url.Parse(raw)
 	b, berr := url.Parse(base)
-	if err != nil || berr != nil || b.Host == "" {
+	if err != nil || berr != nil || b.Host == "" || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
 		return "", false
 	}
 	u.Scheme, u.Host = b.Scheme, b.Host
