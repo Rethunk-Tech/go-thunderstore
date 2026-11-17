@@ -98,7 +98,8 @@ func NewUploader(client *http.Client, site, token string) *Uploader {
 }
 
 // withStorageDial clones hc (and its *http.Transport) so the dial guard cannot mutate the caller's client or
-// http.DefaultTransport.
+// http.DefaultTransport. A RoundTripper that is not *http.Transport is left as-is: the guard needs DialContext,
+// and replacing the tripper would drop the caller's.
 func (u *Uploader) withStorageDial(hc *http.Client) *http.Client {
 	c := *hc
 	rt := c.Transport
@@ -107,15 +108,63 @@ func (u *Uploader) withStorageDial(hc *http.Client) *http.Client {
 	}
 	t, ok := rt.(*http.Transport)
 	if !ok {
-		t, ok = http.DefaultTransport.(*http.Transport)
-		if !ok {
-			t = &http.Transport{}
-		}
+		return &c
 	}
 	t = t.Clone()
 	t.DialContext = u.dialStorage
-	c.Transport = t
+	c.Transport = &storageTransport{u: u, Transport: t}
 	return &c
+}
+
+type viaProxyKey struct{}
+
+// storageTransport checks the request URL's resolved IPs when a proxy will be dialed, so Dialer.Control can
+// allow the proxy address itself.
+type storageTransport struct {
+	u *Uploader
+	*http.Transport
+}
+
+func (s *storageTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	proxy, err := proxyFor(s.Transport, req)
+	if err != nil {
+		return nil, err
+	}
+	if proxy != nil {
+		if err := s.u.checkResolvedHost(req.Context(), req.URL.Hostname()); err != nil {
+			return nil, err
+		}
+		req = req.Clone(context.WithValue(req.Context(), viaProxyKey{}, true))
+	}
+	return s.Transport.RoundTrip(req)
+}
+
+func proxyFor(t *http.Transport, req *http.Request) (*url.URL, error) {
+	fn := t.Proxy
+	if fn == nil {
+		fn = http.ProxyFromEnvironment
+	}
+	return fn(req)
+}
+
+func (u *Uploader) checkResolvedHost(ctx context.Context, host string) error {
+	if u.allowPrivate(host) {
+		return nil
+	}
+	name := strings.ToLower(strings.TrimSuffix(host, "."))
+	if ip, err := netip.ParseAddr(name); err == nil {
+		return refuseBlockedIP(ip.Unmap())
+	}
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return fmt.Errorf("thunderstore gave an upload address that is not a public host")
+	}
+	for _, ip := range ips {
+		if err := refuseBlockedIP(ip.Unmap()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // dialStorage refuses a hop whose resolved address is loopback, link-local, unspecified, or private unless the
@@ -128,6 +177,9 @@ func (u *Uploader) dialStorage(ctx context.Context, network, addr string) (net.C
 	}
 	d := net.Dialer{
 		Control: func(_, address string, _ syscall.RawConn) error {
+			if ctx.Value(viaProxyKey{}) != nil {
+				return nil
+			}
 			if u.allowPrivate(host) {
 				return nil
 			}
@@ -161,8 +213,17 @@ func refuseBlockedAddr(address string) error {
 	if err != nil {
 		return fmt.Errorf("thunderstore gave an upload address that is not a public host")
 	}
-	ip = ip.Unmap()
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || ip.IsUnspecified() {
+	return refuseBlockedIP(ip.Unmap())
+}
+
+var (
+	// IsPrivate does not include CGNAT/tailnet or the well-known NAT64 prefix.
+	cgnat = netip.MustParsePrefix("100.64.0.0/10")
+	nat64 = netip.MustParsePrefix("64:ff9b::/96")
+)
+
+func refuseBlockedIP(ip netip.Addr) error {
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || ip.IsUnspecified() || cgnat.Contains(ip) || nat64.Contains(ip) {
 		return fmt.Errorf("thunderstore gave an upload address that is not a public host")
 	}
 	return nil

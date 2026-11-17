@@ -272,11 +272,73 @@ func TestRefuseBlockedAddr(t *testing.T) {
 		{"[fc00::1]:443", false},
 		{"[2001:4860:4860::8888]:443", true},
 		{"[::ffff:127.0.0.1]:443", false},
+		{"100.64.0.1:443", false},
+		{"[64:ff9b::1]:443", false},
 	} {
 		err := refuseBlockedAddr(tt.addr)
 		if (err == nil) != tt.ok {
 			t.Errorf("%s: err = %v, want ok=%t", tt.addr, err, tt.ok)
 		}
+	}
+}
+
+type recordedTripper struct {
+	called atomic.Bool
+	next   http.RoundTripper
+}
+
+func (r *recordedTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.called.Store(true)
+	return r.next.RoundTrip(req)
+}
+
+func TestUploaderKeepsACustomRoundTripper(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	rec := &recordedTripper{next: srv.Client().Transport}
+	err := NewUploader(&http.Client{Transport: rec}, srv.URL, "tok").call(t.Context(), "p/", map[string]any{}, nil)
+	if !rec.called.Load() {
+		t.Fatal("custom RoundTripper was not called")
+	}
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+}
+
+func TestUploadAllowsALoopbackProxyToAPublicTarget(t *testing.T) {
+	var saw atomic.Bool
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			saw.Store(true)
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer proxy.Close()
+	proxyURL, err := url.Parse(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	up := NewUploader(hc, "https://thunderstore.io/", "")
+	_, err = up.putPart(t.Context(), []byte("abc"), uploadPart{PartNumber: 1, Length: 3, URL: "https://8.8.8.8/part"})
+	if !saw.Load() {
+		t.Fatalf("loopback proxy was not used: %v", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "not a public host") {
+		t.Fatalf("public target via loopback proxy refused: %v", err)
+	}
+}
+
+func TestUploadRefusesAPrivateTargetThroughAPublicProxy(t *testing.T) {
+	proxyURL, err := url.Parse("http://8.8.8.8:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	up := NewUploader(hc, "https://thunderstore.io/", "")
+	_, err = up.putPart(t.Context(), []byte("abc"), uploadPart{PartNumber: 1, Length: 3, URL: "https://10.0.0.1/part"})
+	if err == nil || !strings.Contains(err.Error(), "not a public host") {
+		t.Fatalf("err = %v, want private target refused", err)
 	}
 }
 
