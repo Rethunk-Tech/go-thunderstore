@@ -133,14 +133,18 @@ func (h *hostCheckTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 type viaProxyKey struct{}
 
-// storageTransport checks the request URL's resolved IPs when a proxy will be dialed, so Dialer.Control can
-// allow the proxy address itself.
+// storageTransport checks the request URL's resolved IPs on every request, since a proxy or a caller's TLS dialer
+// skips Dialer.Control, and marks proxied requests so Control can allow the proxy address itself.
 type storageTransport struct {
 	u *Uploader
 	*http.Transport
 }
 
 func (s *storageTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// A caller's DialTLSContext or DialTLS bypasses DialContext and so Control: check the target here too.
+	if err := s.u.checkResolvedHost(req.Context(), req.URL.Hostname()); err != nil {
+		return nil, err
+	}
 	// Nil Proxy is no proxy: Control judges the dialed target. ProxyFromEnvironment would treat HTTPS_PROXY
 	// as a hop and skip that check while the transport still dials direct.
 	if s.Proxy != nil {
@@ -149,9 +153,6 @@ func (s *storageTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			return nil, err
 		}
 		if proxy != nil {
-			if err := s.u.checkResolvedHost(req.Context(), req.URL.Hostname()); err != nil {
-				return nil, err
-			}
 			req = req.Clone(context.WithValue(req.Context(), viaProxyKey{}, true))
 		}
 	}

@@ -1,6 +1,7 @@
 package thunderstore
 
 import (
+	"context"
 	"crypto/md5" // #nosec G501 -- checks the Content-MD5 the upload sends
 	"crypto/tls"
 	"crypto/x509"
@@ -356,6 +357,25 @@ func TestUploadRefusesLoopbackThroughAWrappedTransport(t *testing.T) {
 	requireLoopbackName(t, "localhost.localdomain")
 	port, dialed := listenLoopback(t)
 	hc := &http.Client{Transport: &wrappedTripper{Base: &http.Transport{}}}
+	up := NewUploader(hc, "https://thunderstore.io/", "")
+	_, err := up.putPart(t.Context(), []byte("abc"), uploadPart{
+		PartNumber: 1, Length: 3,
+		URL: fmt.Sprintf("https://localhost.localdomain:%d/part", port),
+	})
+	if err == nil || !strings.Contains(err.Error(), "not a public host") || dialed.Load() != 0 {
+		t.Fatalf("err = %v, loopback name was dialed %d times", err, dialed.Load())
+	}
+}
+
+func TestUploadRefusesLoopbackThroughACallerTLSDialer(t *testing.T) {
+	requireLoopbackName(t, "localhost.localdomain")
+	port, dialed := listenLoopback(t)
+	var d net.Dialer
+	hc := &http.Client{Transport: &http.Transport{
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return d.DialContext(ctx, network, addr)
+		},
+	}}
 	up := NewUploader(hc, "https://thunderstore.io/", "")
 	_, err := up.putPart(t.Context(), []byte("abc"), uploadPart{
 		PartNumber: 1, Length: 3,
