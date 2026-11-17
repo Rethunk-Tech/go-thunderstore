@@ -249,7 +249,7 @@ func TestUploaderChecksWhereTheSiteSendsTheZip(t *testing.T) {
 }
 
 func TestUploadDoesNotDialADisguisedLoopbackPartURL(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,11 @@ func TestUploadDoesNotDialADisguisedLoopbackPartURL(t *testing.T) {
 	if err := safefs.WriteFile(pkg, []byte("0123456789"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listen addr is %T", ln.Addr())
+	}
+	port := addr.Port
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/initiate-upload/") {
 			_, _ = fmt.Fprintf(w, `{"user_media":{"uuid":"12345678-1234-1234-1234-123456789012"},"upload_urls":[{"part_number":1,"url":"https://0x7f000001:%d/part","offset":0,"length":10}]}`, port)
