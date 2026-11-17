@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/Rethunk-Tech/go-httpkit"
 	"github.com/Rethunk-Tech/go-safefs"
@@ -92,8 +93,79 @@ func NewUploader(client *http.Client, site, token string) *Uploader {
 		client = http.DefaultClient
 	}
 	u := &Uploader{site: strings.TrimRight(site, "/") + "/", token: token}
-	u.client = httpkit.WithRedirect(client, u.checkRedirect)
+	u.client = u.withStorageDial(httpkit.WithRedirect(client, u.checkRedirect))
 	return u
+}
+
+// withStorageDial clones hc (and its *http.Transport) so the dial guard cannot mutate the caller's client or
+// http.DefaultTransport.
+func (u *Uploader) withStorageDial(hc *http.Client) *http.Client {
+	c := *hc
+	rt := c.Transport
+	if rt == nil {
+		rt = http.DefaultTransport
+	}
+	t, ok := rt.(*http.Transport)
+	if !ok {
+		t, ok = http.DefaultTransport.(*http.Transport)
+		if !ok {
+			t = &http.Transport{}
+		}
+	}
+	t = t.Clone()
+	t.DialContext = u.dialStorage
+	c.Transport = t
+	return &c
+}
+
+// dialStorage refuses a hop whose resolved address is loopback, link-local, unspecified, or private unless the
+// request host is the site itself or on AllowStorageHosts. checkStorage only sees the name, so a DNS record pointing
+// at 127.0.0.1 would otherwise pass.
+func (u *Uploader) dialStorage(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = hostOnly(addr)
+	}
+	d := net.Dialer{
+		Control: func(_, address string, _ syscall.RawConn) error {
+			if u.allowPrivate(host) {
+				return nil
+			}
+			return refuseBlockedAddr(address)
+		},
+	}
+	return d.DialContext(ctx, network, addr)
+}
+
+func (u *Uploader) allowPrivate(host string) bool {
+	name := strings.ToLower(strings.TrimSuffix(host, "."))
+	if site, err := url.Parse(u.site); err == nil && site.Host != "" {
+		if strings.ToLower(strings.TrimSuffix(hostOnly(site.Host), ".")) == name {
+			return true
+		}
+	}
+	return slices.ContainsFunc(u.storageHosts, func(h string) bool {
+		return strings.EqualFold(h, name)
+	})
+}
+
+func refuseBlockedAddr(address string) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = hostOnly(address)
+	}
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i]
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("thunderstore gave an upload address that is not a public host")
+	}
+	ip = ip.Unmap()
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || ip.IsUnspecified() {
+		return fmt.Errorf("thunderstore gave an upload address that is not a public host")
+	}
+	return nil
 }
 
 // checkRedirect keeps every hop on the host the first request named, so a storage endpoint cannot 307/308 the zip
@@ -108,7 +180,8 @@ func (u *Uploader) checkRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-// AllowStorageHosts restricts where the zip may be sent to the named hostnames (no port). Thunderstore deployments
+// AllowStorageHosts restricts where the zip may be sent to the named hostnames (no port). A listed name may resolve
+// to a private or loopback address; without this call those are refused at dial time. Thunderstore deployments
 // choose their storage endpoint themselves (USERMEDIA_S3_ENDPOINT_URL in its settings), so there is no host the library
 // can assume; without this call the parts must still share one non-IP host, which the site's own answer names.
 func (u *Uploader) AllowStorageHosts(hosts ...string) { u.storageHosts = hosts }

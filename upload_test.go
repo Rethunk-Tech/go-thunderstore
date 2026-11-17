@@ -253,6 +253,99 @@ func TestUploaderChecksWhereTheSiteSendsTheZip(t *testing.T) {
 	}
 }
 
+func TestRefuseBlockedAddr(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		addr string
+		ok   bool
+	}{
+		{"8.8.8.8:443", true},
+		{"127.0.0.1:443", false},
+		{"10.0.0.1:443", false},
+		{"192.168.1.1:443", false},
+		{"172.16.0.1:443", false},
+		{"169.254.169.254:80", false},
+		{"0.0.0.0:443", false},
+		{"[::1]:443", false},
+		{"[::]:443", false},
+		{"[fe80::1]:443", false},
+		{"[fc00::1]:443", false},
+		{"[2001:4860:4860::8888]:443", true},
+		{"[::ffff:127.0.0.1]:443", false},
+	} {
+		err := refuseBlockedAddr(tt.addr)
+		if (err == nil) != tt.ok {
+			t.Errorf("%s: err = %v, want ok=%t", tt.addr, err, tt.ok)
+		}
+	}
+}
+
+func TestAllowPrivate(t *testing.T) {
+	t.Parallel()
+	up := NewUploader(nil, "https://thunderstore.io/", "")
+	if up.allowPrivate("localhost.localdomain") {
+		t.Fatal("unlisted name allowed")
+	}
+	up.AllowStorageHosts("localhost.localdomain")
+	if !up.allowPrivate("localhost.localdomain") {
+		t.Fatal("listed name refused")
+	}
+	if !up.allowPrivate("thunderstore.io") {
+		t.Fatal("site host refused")
+	}
+}
+
+func TestUploadDoesNotDialANameThatResolvesToLoopback(t *testing.T) {
+	ips, err := net.DefaultResolver.LookupNetIP(t.Context(), "ip", "localhost.localdomain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loopback := false
+	for _, ip := range ips {
+		if ip.IsLoopback() {
+			loopback = true
+			break
+		}
+	}
+	if !loopback {
+		t.Fatal("localhost.localdomain did not resolve to loopback")
+	}
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	var dialed atomic.Int32
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			dialed.Add(1)
+			_ = c.Close()
+		}
+	}()
+	pkg := filepath.Join(t.TempDir(), "a.zip")
+	if err := safefs.WriteFile(pkg, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listen addr is %T", ln.Addr())
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/initiate-upload/") {
+			_, _ = fmt.Fprintf(w, `{"user_media":{"uuid":"12345678-1234-1234-1234-123456789012"},"upload_urls":[{"part_number":1,"url":"https://localhost.localdomain:%d/part","offset":0,"length":10}]}`, addr.Port)
+		}
+	}))
+	defer srv.Close()
+	_, err = NewUploader(srv.Client(), srv.URL, "tok").Upload(t.Context(), pkg)
+	if err == nil || dialed.Load() != 0 {
+		t.Fatalf("err = %v, loopback name was dialed %d times", err, dialed.Load())
+	}
+}
+
 func TestUploadDoesNotDialADisguisedLoopbackPartURL(t *testing.T) {
 	ln, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
