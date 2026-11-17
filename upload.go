@@ -141,26 +141,21 @@ type storageTransport struct {
 }
 
 func (s *storageTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	proxy, err := proxyFor(s.Transport, req)
-	if err != nil {
-		return nil, err
-	}
-	if proxy != nil {
-		if err := s.u.checkResolvedHost(req.Context(), req.URL.Hostname()); err != nil {
+	// Nil Proxy is no proxy: Control judges the dialed target. ProxyFromEnvironment would treat HTTPS_PROXY
+	// as a hop and skip that check while the transport still dials direct.
+	if s.Proxy != nil {
+		proxy, err := s.Proxy(req)
+		if err != nil {
 			return nil, err
 		}
-		req = req.Clone(context.WithValue(req.Context(), viaProxyKey{}, true))
+		if proxy != nil {
+			if err := s.u.checkResolvedHost(req.Context(), req.URL.Hostname()); err != nil {
+				return nil, err
+			}
+			req = req.Clone(context.WithValue(req.Context(), viaProxyKey{}, true))
+		}
 	}
 	return s.Transport.RoundTrip(req)
-}
-
-func proxyFor(t *http.Transport, req *http.Request) (*url.URL, error) {
-	// A nil Proxy is no proxy: Control judges the dialed target. ProxyFromEnvironment would treat HTTPS_PROXY
-	// as a hop and skip that check while the transport still dials direct.
-	if t.Proxy == nil {
-		return nil, nil
-	}
-	return t.Proxy(req)
 }
 
 func (u *Uploader) checkResolvedHost(ctx context.Context, host string) error {
