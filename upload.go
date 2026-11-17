@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Rethunk-Tech/go-httpkit"
@@ -134,7 +135,7 @@ func (u *Uploader) checkStorage(parts []uploadPart) error {
 		return nil
 	}
 	name := strings.ToLower(strings.TrimSuffix(hostOnly(host), "."))
-	if _, err := netip.ParseAddr(name); err == nil {
+	if _, err := netip.ParseAddr(name); err == nil || atonIPv4(name) {
 		return fmt.Errorf("thunderstore gave an upload address that is an IP address")
 	}
 	if len(u.storageHosts) > 0 && !slices.ContainsFunc(u.storageHosts, func(h string) bool { return strings.EqualFold(h, name) }) {
@@ -148,6 +149,46 @@ func hostOnly(hostport string) string {
 		return h
 	}
 	return strings.Trim(hostport, "[]")
+}
+
+// atonIPv4 reports the IPv4 forms Unix getaddrinfo treats as addresses (hex, octal, and a.b / a.b.c) that
+// netip.ParseAddr does not, so a part URL of https://0x7f000001/ is refused like 127.0.0.1.
+func atonIPv4(s string) bool {
+	parts := strings.Split(s, ".")
+	if s == "" || len(parts) > 4 {
+		return false
+	}
+	var vals [4]uint64
+	for i, p := range parts {
+		if p == "" {
+			return false
+		}
+		base, digits := 10, p
+		switch {
+		case strings.HasPrefix(p, "0x"):
+			if len(p) == 2 {
+				return false
+			}
+			base, digits = 16, p[2:]
+		case len(p) > 1 && p[0] == '0':
+			base = 8
+		}
+		v, err := strconv.ParseUint(digits, base, 32)
+		if err != nil {
+			return false
+		}
+		vals[i] = v
+	}
+	switch len(parts) {
+	case 1:
+		return vals[0] <= 0xffffffff
+	case 2:
+		return vals[0] <= 0xff && vals[1] <= 0xffffff
+	case 3:
+		return vals[0] <= 0xff && vals[1] <= 0xff && vals[2] <= 0xffff
+	default:
+		return vals[0] <= 0xff && vals[1] <= 0xff && vals[2] <= 0xff && vals[3] <= 0xff
+	}
 }
 
 type uploadPart struct {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Rethunk-Tech/go-safefs"
@@ -228,6 +230,12 @@ func TestUploaderChecksWhereTheSiteSendsTheZip(t *testing.T) {
 		{"split across hosts", nil, []uploadPart{part("https://s3.example/a"), part("https://other.example/b")}, false},
 		{"IP literal", nil, []uploadPart{part("https://169.254.169.254/a")}, false},
 		{"IPv6 literal", nil, []uploadPart{part("https://[::1]:9000/a")}, false},
+		{"hex IP", nil, []uploadPart{part("https://0x7f000001/a")}, false},
+		{"decimal IP", nil, []uploadPart{part("https://2130706433/a")}, false},
+		{"short IP", nil, []uploadPart{part("https://127.1/a")}, false},
+		{"octal IP", nil, []uploadPart{part("https://0177.0.0.1/a")}, false},
+		{"hex-dotted IP", nil, []uploadPart{part("https://0x7f.0x0.0x0.0x1/a")}, false},
+		{"hex IMDS", nil, []uploadPart{part("https://0xa9fea9fe/a")}, false},
 		{"on the allow-list", []string{"S3.example"}, []uploadPart{part("https://s3.example:443/a")}, true},
 		{"off the allow-list", []string{"s3.example"}, []uploadPart{part("https://evil.example/a")}, false},
 	}
@@ -237,6 +245,40 @@ func TestUploaderChecksWhereTheSiteSendsTheZip(t *testing.T) {
 		if err := up.checkStorage(tt.parts); (err == nil) != tt.ok {
 			t.Errorf("%s: err = %v, want ok=%t", tt.name, err, tt.ok)
 		}
+	}
+}
+
+func TestUploadDoesNotDialADisguisedLoopbackPartURL(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	var dialed atomic.Int32
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			dialed.Add(1)
+			_ = c.Close()
+		}
+	}()
+	pkg := filepath.Join(t.TempDir(), "a.zip")
+	if err := safefs.WriteFile(pkg, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/initiate-upload/") {
+			_, _ = fmt.Fprintf(w, `{"user_media":{"uuid":"12345678-1234-1234-1234-123456789012"},"upload_urls":[{"part_number":1,"url":"https://0x7f000001:%d/part","offset":0,"length":10}]}`, port)
+		}
+	}))
+	defer srv.Close()
+	_, err = NewUploader(srv.Client(), srv.URL, "tok").Upload(t.Context(), pkg)
+	if err == nil || dialed.Load() != 0 {
+		t.Fatalf("err = %v, disguised loopback was dialed %d times", err, dialed.Load())
 	}
 }
 
