@@ -98,8 +98,8 @@ func NewUploader(client *http.Client, site, token string) *Uploader {
 }
 
 // withStorageDial clones hc (and its *http.Transport) so the dial guard cannot mutate the caller's client or
-// http.DefaultTransport. A RoundTripper that is not *http.Transport is left as-is: the guard needs DialContext,
-// and replacing the tripper would drop the caller's.
+// http.DefaultTransport. A RoundTripper that is not *http.Transport cannot take DialContext, so the resolved-host
+// check runs in a wrapper that still delegates to the caller's tripper.
 func (u *Uploader) withStorageDial(hc *http.Client) *http.Client {
 	c := *hc
 	rt := c.Transport
@@ -108,12 +108,27 @@ func (u *Uploader) withStorageDial(hc *http.Client) *http.Client {
 	}
 	t, ok := rt.(*http.Transport)
 	if !ok {
+		c.Transport = &hostCheckTransport{u: u, base: rt}
 		return &c
 	}
 	t = t.Clone()
 	t.DialContext = u.dialStorage
 	c.Transport = &storageTransport{u: u, Transport: t}
 	return &c
+}
+
+// hostCheckTransport runs the resolved-host check on each request, including redirect hops, when the caller's
+// RoundTripper is not an *http.Transport we can clone and attach Dialer.Control to.
+type hostCheckTransport struct {
+	u    *Uploader
+	base http.RoundTripper
+}
+
+func (h *hostCheckTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := h.u.checkResolvedHost(req.Context(), req.URL.Hostname()); err != nil {
+		return nil, err
+	}
+	return h.base.RoundTrip(req)
 }
 
 type viaProxyKey struct{}
@@ -140,11 +155,12 @@ func (s *storageTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 func proxyFor(t *http.Transport, req *http.Request) (*url.URL, error) {
-	fn := t.Proxy
-	if fn == nil {
-		fn = http.ProxyFromEnvironment
+	// A nil Proxy is no proxy: Control judges the dialed target. ProxyFromEnvironment would treat HTTPS_PROXY
+	// as a hop and skip that check while the transport still dials direct.
+	if t.Proxy == nil {
+		return nil, nil
 	}
-	return fn(req)
+	return t.Proxy(req)
 }
 
 func (u *Uploader) checkResolvedHost(ctx context.Context, host string) error {

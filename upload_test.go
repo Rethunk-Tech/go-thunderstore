@@ -305,6 +305,84 @@ func TestUploaderKeepsACustomRoundTripper(t *testing.T) {
 	}
 }
 
+type wrappedTripper struct {
+	Base http.RoundTripper
+}
+
+func (w *wrappedTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return w.Base.RoundTrip(req)
+}
+
+func listenLoopback(t *testing.T) (port int, dialed *atomic.Int32) {
+	t.Helper()
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	dialed = new(atomic.Int32)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			dialed.Add(1)
+			_ = c.Close()
+		}
+	}()
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listen addr is %T", ln.Addr())
+	}
+	return addr.Port, dialed
+}
+
+func requireLoopbackName(t *testing.T, name string) {
+	t.Helper()
+	ips, err := net.DefaultResolver.LookupNetIP(t.Context(), "ip", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() {
+			return
+		}
+	}
+	t.Fatalf("%s did not resolve to loopback", name)
+}
+
+func TestUploadRefusesLoopbackThroughAWrappedTransport(t *testing.T) {
+	requireLoopbackName(t, "localhost.localdomain")
+	port, dialed := listenLoopback(t)
+	hc := &http.Client{Transport: &wrappedTripper{Base: &http.Transport{}}}
+	up := NewUploader(hc, "https://thunderstore.io/", "")
+	_, err := up.putPart(t.Context(), []byte("abc"), uploadPart{
+		PartNumber: 1, Length: 3,
+		URL: fmt.Sprintf("https://localhost.localdomain:%d/part", port),
+	})
+	if err == nil || !strings.Contains(err.Error(), "not a public host") || dialed.Load() != 0 {
+		t.Fatalf("err = %v, loopback name was dialed %d times", err, dialed.Load())
+	}
+}
+
+func TestUploadRefusesLoopbackWhenProxyIsNil(t *testing.T) {
+	requireLoopbackName(t, "localhost.localdomain")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+	t.Setenv("NO_PROXY", "")
+	port, dialed := listenLoopback(t)
+	hc := &http.Client{Transport: &http.Transport{}}
+	up := NewUploader(hc, "https://thunderstore.io/", "")
+	_, err := up.putPart(t.Context(), []byte("abc"), uploadPart{
+		PartNumber: 1, Length: 3,
+		URL: fmt.Sprintf("https://localhost.localdomain:%d/part", port),
+	})
+	if err == nil || !strings.Contains(err.Error(), "not a public host") || dialed.Load() != 0 {
+		t.Fatalf("err = %v, loopback name was dialed %d times", err, dialed.Load())
+	}
+}
+
 func TestUploadAllowsALoopbackProxyToAPublicTarget(t *testing.T) {
 	var saw atomic.Bool
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
