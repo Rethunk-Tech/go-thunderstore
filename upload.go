@@ -295,7 +295,11 @@ func storageURL(raw, apiBase string) (string, error) {
 	if err != nil || u.Host == "" {
 		return "", fmt.Errorf("thunderstore gave an unusable upload address")
 	}
-	if api, err := url.Parse(apiBase); u.Scheme != "https" && (err != nil || api.Scheme != "http" || u.Host != api.Host) {
+	if u.Scheme == "https" {
+		return raw, nil
+	}
+	api, aerr := url.Parse(apiBase)
+	if aerr != nil || u.Scheme != "http" || api.Scheme != "http" || u.Host != api.Host {
 		return "", fmt.Errorf("thunderstore gave an upload address that is not https")
 	}
 	return raw, nil
