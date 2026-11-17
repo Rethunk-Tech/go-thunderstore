@@ -13,11 +13,13 @@ var CDNs = []string{
 }
 
 // OnHost is raw with its scheme and host replaced by those of base, the same path and query. Only an absolute http or
-// https address is rewritten: any other scheme would land on base's host with the original opaque part, off the site.
+// https address is rewritten onto an http or https base: any other scheme would land on base's host with the original
+// opaque part, off the site.
 func OnHost(raw, base string) (string, bool) {
 	u, err := url.Parse(raw)
 	b, berr := url.Parse(base)
-	if err != nil || berr != nil || b.Host == "" || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+	if err != nil || berr != nil || b.Host == "" || u.Host == "" ||
+		(u.Scheme != "https" && u.Scheme != "http") || (b.Scheme != "https" && b.Scheme != "http") {
 		return "", false
 	}
 	u.Scheme, u.Host = b.Scheme, b.Host
