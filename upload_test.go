@@ -236,6 +236,11 @@ func TestUploaderChecksWhereTheSiteSendsTheZip(t *testing.T) {
 		{"octal IP", nil, []uploadPart{part("https://0177.0.0.1/a")}, false},
 		{"hex-dotted IP", nil, []uploadPart{part("https://0x7f.0x0.0x0.0x1/a")}, false},
 		{"hex IMDS", nil, []uploadPart{part("https://0xa9fea9fe/a")}, false},
+		{"fullwidth IP", nil, []uploadPart{part("https://１２７.０.０.１/a")}, false},
+		{"ideographic digit IP", nil, []uploadPart{part("https://１２７.０.０.１:9000/a")}, false},
+		{"localhost", nil, []uploadPart{part("https://localhost/a")}, false},
+		{"localhost with port", nil, []uploadPart{part("https://localhost:9000/a")}, false},
+		{"localhost subdomain", nil, []uploadPart{part("https://s3.localhost/a")}, false},
 		{"on the allow-list", []string{"S3.example"}, []uploadPart{part("https://s3.example:443/a")}, true},
 		{"off the allow-list", []string{"s3.example"}, []uploadPart{part("https://evil.example/a")}, false},
 	}

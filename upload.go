@@ -135,13 +135,34 @@ func (u *Uploader) checkStorage(parts []uploadPart) error {
 		return nil
 	}
 	name := strings.ToLower(strings.TrimSuffix(hostOnly(host), "."))
+	// A name that is not ASCII is refused rather than resolved: IDNA maps fullwidth digits and lookalikes onto
+	// ASCII, so １２７.０.０.１ is loopback the checks below never see.
+	if nonASCII(name) {
+		return fmt.Errorf("thunderstore gave an upload host that is not an ASCII name")
+	}
 	if _, err := netip.ParseAddr(name); err == nil || atonIPv4(name) {
 		return fmt.Errorf("thunderstore gave an upload address that is an IP address")
 	}
-	if len(u.storageHosts) > 0 && !slices.ContainsFunc(u.storageHosts, func(h string) bool { return strings.EqualFold(h, name) }) {
-		return fmt.Errorf("thunderstore gave an upload host that is not allowed: %s", name)
+	if len(u.storageHosts) > 0 {
+		if !slices.ContainsFunc(u.storageHosts, func(h string) bool { return strings.EqualFold(h, name) }) {
+			return fmt.Errorf("thunderstore gave an upload host that is not allowed: %s", name)
+		}
+		return nil
+	}
+	if name == "localhost" || strings.HasSuffix(name, ".localhost") {
+		return fmt.Errorf("thunderstore gave an upload address that is the local machine")
 	}
 	return nil
+}
+
+// nonASCII reports whether s holds a byte outside ASCII.
+func nonASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return true
+		}
+	}
+	return false
 }
 
 func hostOnly(hostport string) string {
