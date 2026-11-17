@@ -1,0 +1,3 @@
+go test fuzz v1
+string("lethal-company-c0-0000000000000000000000000000000000000000000000000000000000000000.json.\\.tmp")
+string("lethal-company")

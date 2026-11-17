@@ -443,6 +443,9 @@ func dropOtherListings(dir, community, keep string) {
 // ownListing reports whether name is a listing file or build temp file of exactly this community under some tag:
 // "<community>-c<digits>-<hash>.json", where another community's key may itself contain "-c<digits>-".
 func ownListing(name, community string) bool {
+	if strings.ContainsAny(name, `/\`) {
+		return false
+	}
 	rest, ok := strings.CutPrefix(name, community+"-c")
 	tag, tail, tagged := strings.Cut(rest, "-")
 	if !ok || !tagged || tag == "" || strings.Trim(tag, "0123456789") != "" {
