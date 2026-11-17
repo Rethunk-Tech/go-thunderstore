@@ -22,7 +22,7 @@ func OnHost(raw, base string) (string, bool) {
 		(u.Scheme != "https" && u.Scheme != "http") || (b.Scheme != "https" && b.Scheme != "http") {
 		return "", false
 	}
-	u.Scheme, u.Host = b.Scheme, b.Host
+	u.Scheme, u.Host, u.User = b.Scheme, b.Host, nil
 	return u.String(), true
 }
 
