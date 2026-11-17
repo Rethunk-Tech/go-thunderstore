@@ -119,6 +119,29 @@ func TestUploadRefusesBadInitiateAnswers(t *testing.T) {
 	}
 }
 
+func TestUploadAbortsWhenStorageIsSplitAcrossHosts(t *testing.T) {
+	pkg := filepath.Join(t.TempDir(), "a.zip")
+	if err := safefs.WriteFile(pkg, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	aborted := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/initiate-upload/"):
+			_, _ = w.Write([]byte(`{"user_media":{"uuid":"12345678-1234-1234-1234-123456789012"},"upload_urls":[{"part_number":1,"url":"https://s3.example/a","offset":0,"length":5},{"part_number":2,"url":"https://other.example/b","offset":5,"length":5}]}`))
+		case strings.Contains(r.URL.Path, "/abort-upload/"):
+			aborted = true
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	_, err := NewUploader(srv.Client(), srv.URL, "tok").Upload(t.Context(), pkg)
+	if err == nil || !aborted {
+		t.Fatalf("err = %v, aborted = %v, want split storage refused and abort-upload", err, aborted)
+	}
+}
+
 func TestErrorBodyIsCut(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
