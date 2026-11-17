@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -256,6 +257,106 @@ func TestSlimKeepsEveryVersion(t *testing.T) {
 	if len(p.Versions) != 2 {
 		t.Fatalf("versions = %d, want 2", len(p.Versions))
 	}
+}
+
+func FuzzGithubRepo(f *testing.F) {
+	for _, raw := range []string{
+		"https://github.com/Ns/Repo", "https://www.github.com/Ns/Repo.git", "https://github.com/Ns/Repo/tree/x",
+		"https://github.com/Ns", "https://github.com/../Repo", "https://gitlab.com/Ns/Repo", "not a url",
+		"https://github.com/Alice/MoreCompany.git", "",
+	} {
+		f.Add(raw)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		got := githubRepo(raw)
+		if got == "" {
+			return
+		}
+		owner, name, ok := strings.Cut(got, "/")
+		if !ok || owner == "" || name == "" || strings.Contains(name, "/") || owner == ".." || name == ".." {
+			t.Fatalf("githubRepo(%q) = %q", raw, got)
+		}
+		bound := 3 * len(raw)
+		if len(got) > bound {
+			t.Fatalf("unbounded repo %q from %q", got, raw)
+		}
+	})
+}
+
+func FuzzWebLink(f *testing.F) {
+	for _, raw := range []string{"javascript:alert(1)", "https://ko-fi.com/x", "https://ko-fi.com/Alice", "http://example.com/a", "", "file:///etc/passwd", "/relative"} {
+		f.Add(raw)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		got := webLink(raw)
+		if got == "" {
+			return
+		}
+		if got != raw {
+			t.Fatalf("webLink rewrote %q to %q", raw, got)
+		}
+		u, err := url.Parse(got)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			t.Fatalf("webLink(%q) = %q", raw, got)
+		}
+	})
+}
+
+func FuzzReadPackages(f *testing.F) {
+	f.Add([]byte(`[{"owner":"A","name":"M","versions":[{"v":"1.0.0","d":[0]}]}]` + "\n" + `["Only-One-1.0.0"]`))
+	f.Add([]byte(`[{"owner":"A","name":"M","versions":[{"v":"1.0.0","d":[0,1]}]}]` + "\n" + `["Only-One-1.0.0"]`))
+	f.Add([]byte(`[]` + "\n" + `[]`))
+	f.Add([]byte(`{}`))
+	f.Add([]byte(``))
+	f.Add([]byte(`[{"owner":"akechii","name":"DiscountAlert","versions":[{"v":"1.0.0"}]},{"owner":"Akechii","name":"discountalert","versions":[{"v":"2.0.0"}]}]` + "\n" + `[]`))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		path := filepath.Join(t.TempDir(), "listing.json")
+		if err := os.WriteFile(path, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		pk, err := readPackages(path)
+		if err != nil {
+			return
+		}
+		for i := range pk {
+			p := &pk[i]
+			_ = p.ID()
+			_ = p.VersionNumbers()
+			for _, v := range p.Versions {
+				for _, d := range p.Dependencies(v) {
+					if len(d) > 3*len(b) {
+						t.Fatalf("unbounded dependency %q from %q", d, b)
+					}
+				}
+			}
+		}
+	})
+}
+
+func FuzzVersionUnmarshal(f *testing.F) {
+	f.Add([]byte(`{"v":"1.0.0"}`))
+	f.Add([]byte(`{"v":"1.0.0","d":[0,1,127,128]}`))
+	f.Add([]byte(`{"v":"1.0.0","size":99,"t":1768471200,"d":[0]}`))
+	f.Add([]byte(`{"v":"2.0.0","d":[0,1,16384]}`))
+	f.Add([]byte(`[]`))
+	f.Add([]byte(``))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		var v Version
+		if err := json.Unmarshal(b, &v); err != nil {
+			return
+		}
+		if len(v.Number) > 3*len(b) {
+			t.Fatalf("unbounded number %q from %q", v.Number, b)
+		}
+		enc, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rt Version
+		if err := json.Unmarshal(enc, &rt); err != nil || rt.Number != v.Number || rt.Size != v.Size || rt.Created != v.Created || rt.deps != v.deps {
+			t.Fatalf("round-trip %+v from %q: %+v %v", v, b, rt, err)
+		}
+	})
 }
 
 func FuzzIndexChunkDecode(f *testing.F) {

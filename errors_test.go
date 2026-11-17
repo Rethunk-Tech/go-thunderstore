@@ -2,6 +2,7 @@ package thunderstore
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -146,4 +147,33 @@ func TestParseDependencyErrorTruncatesInput(t *testing.T) {
 	if err == nil || len(err.Error()) > 200 {
 		t.Fatalf("err length = %d, want a short error", len(err.Error()))
 	}
+}
+
+func FuzzCategoryFilters(f *testing.F) {
+	body, err := os.ReadFile("testdata/community-filters.json")
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(body)
+	f.Add([]byte(`{"package_categories":[]}`))
+	f.Add([]byte(`{"package_categories":[{"slug":"tools","name":"Tools"}]}`))
+	f.Add([]byte(`{"package_categories":"x"}`))
+	f.Add([]byte(``))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		var filters struct {
+			Categories []struct {
+				Slug string `json:"slug"`
+				Name string `json:"name"`
+			} `json:"package_categories"`
+		}
+		if json.Unmarshal(b, &filters) != nil {
+			return
+		}
+		bound := 3 * len(b)
+		for _, cat := range filters.Categories {
+			if len(cat.Slug) > bound || len(cat.Name) > bound {
+				t.Fatalf("unbounded category from %q", b)
+			}
+		}
+	})
 }

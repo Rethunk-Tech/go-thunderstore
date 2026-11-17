@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -223,4 +225,69 @@ func TestPutPartErrorHidesSignedURL(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "SECRET") {
 		t.Fatalf("err = %v, want a failure without the signed URL", err)
 	}
+}
+
+func FuzzStorageURL(f *testing.F) {
+	f.Add("https://s3.example/a", "https://thunderstore.io/")
+	f.Add("http://evil.example/part", "https://thunderstore.io/")
+	f.Add("http://localhost/p", "http://localhost/")
+	f.Add("javascript:alert(1)", "https://thunderstore.io/")
+	f.Add("", "https://thunderstore.io/")
+	f.Add("https://s3.example/p?X-Amz-Signature=SECRET", "https://thunderstore.io/")
+	f.Fuzz(func(t *testing.T, raw, apiBase string) {
+		got, err := storageURL(raw, apiBase)
+		if err != nil {
+			return
+		}
+		if got != raw {
+			t.Fatalf("storageURL rewrote %q to %q", raw, got)
+		}
+		u, err := url.Parse(got)
+		if err != nil || u.Host == "" {
+			t.Fatalf("accepted unusable %q", got)
+		}
+		if u.Scheme == "https" {
+			return
+		}
+		api, aerr := url.Parse(apiBase)
+		if aerr != nil || api.Scheme != "http" || u.Host != api.Host || u.Scheme != "http" {
+			t.Fatalf("accepted non-https %q with api %q", got, apiBase)
+		}
+	})
+}
+
+func FuzzCheckStorage(f *testing.F) {
+	f.Add("https://s3.example/a", "https://s3.example/b")
+	f.Add("https://s3.example/a", "https://other.example/b")
+	f.Add("https://169.254.169.254/a", "")
+	f.Add("https://[::1]:9000/a", "")
+	f.Add("https://thunderstore.io/a", "")
+	f.Add("https://s3.example:443/a", "")
+	f.Fuzz(func(t *testing.T, a, b string) {
+		up := NewUploader(nil, "https://thunderstore.io/", "")
+		parts := []uploadPart{{URL: a}}
+		if b != "" {
+			parts = append(parts, uploadPart{URL: b})
+		}
+		if err := up.checkStorage(parts); err != nil {
+			return
+		}
+		var host string
+		for _, p := range parts {
+			u, err := url.Parse(p.URL)
+			if err != nil || u.Host == "" {
+				t.Fatalf("accepted unusable %q", p.URL)
+			}
+			if host == "" {
+				host = u.Host
+			}
+			if u.Host != host {
+				t.Fatalf("accepted split hosts %q and %q", host, u.Host)
+			}
+			name := strings.ToLower(strings.TrimSuffix(hostOnly(u.Host), "."))
+			if _, err := netip.ParseAddr(name); err == nil && u.Host != "thunderstore.io" {
+				t.Fatalf("accepted IP upload host %q", p.URL)
+			}
+		}
+	})
 }

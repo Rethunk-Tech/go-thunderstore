@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -548,4 +549,95 @@ func TestAnIndexWithNoPackagesStoresNothing(t *testing.T) {
 	if ents, _ := os.ReadDir(c.dir()); len(ents) != 0 {
 		t.Fatalf("left %d files behind", len(ents))
 	}
+}
+
+func FuzzChunkAllowed(f *testing.F) {
+	for _, raw := range []string{
+		"https://thunderstore.io/chunk", "http://169.254.169.254/latest/meta-data",
+		"https://gcdn.thunderstore.io/x", "https://evil.com/x", "https://thunderstore.io.evil.com/x",
+		"", "javascript:alert(1)", "https://", "/relative",
+	} {
+		f.Add(raw)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		c := &Client{cfg: Config{BaseURL: "https://thunderstore.io"}}
+		if !c.chunkAllowed(raw) {
+			return
+		}
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			t.Fatalf("allowed unparseable %q", raw)
+		}
+		host := u.Hostname()
+		onSite := u.Scheme == "https" && u.Host == "thunderstore.io"
+		onTS := u.Scheme == "https" && (host == "thunderstore.io" || strings.HasSuffix(host, ".thunderstore.io"))
+		if !onSite && !onTS {
+			t.Fatalf("allowed off-site chunk %q", raw)
+		}
+	})
+}
+
+func FuzzOwnListing(f *testing.F) {
+	f.Add(community+"-c4-"+hash64+".json", community)
+	f.Add(community+"-custom-c2-"+hash64+".json", community)
+	f.Add(community+"-c4-"+hash64+".json.987.tmp", community)
+	f.Add("../etc-c4-"+hash64+".json", community)
+	f.Add(community+"-c1-x-c4-"+hash64+".json", community)
+	f.Add("lethal-company-c4-notahash.json", "lethal-company")
+	f.Add("", "")
+	f.Fuzz(func(t *testing.T, name, community string) {
+		if strings.ContainsAny(name, `/\`) {
+			if ownListing(name, community) {
+				t.Fatalf("ownListing accepted path %q for %q", name, community)
+			}
+			return
+		}
+		if !ownListing(name, community) {
+			return
+		}
+		if !strings.HasPrefix(name, community+"-c") {
+			t.Fatalf("ownListing(%q, %q)", name, community)
+		}
+	})
+}
+
+func FuzzCommunityKey(f *testing.F) {
+	for _, k := range []string{community, "../../etc", "Lethal-Company", "", "a", "foo/../bar", "foo_bar", "risk-of-rain-2"} {
+		f.Add(k)
+	}
+	f.Fuzz(func(t *testing.T, community string) {
+		if !communityKey.MatchString(community) {
+			return
+		}
+		if strings.ContainsAny(community, `/\.`) || strings.Contains(community, "..") {
+			t.Fatalf("community key %q is not path-safe", community)
+		}
+		dir := string(filepath.Separator) + "cache"
+		path := listingPath(dir, community, hash64)
+		rel, err := filepath.Rel(dir, path)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			t.Fatalf("listing path %q escapes %q", path, dir)
+		}
+	})
+}
+
+func FuzzValidHash(f *testing.F) {
+	f.Add(hash64)
+	f.Add("../../x")
+	f.Add("")
+	f.Add(strings.ToUpper(hash64))
+	f.Add(hash64[:63])
+	f.Fuzz(func(t *testing.T, h string) {
+		if !validHash(h) {
+			return
+		}
+		if len(h) != 64 || h != strings.ToLower(h) {
+			t.Fatalf("validHash(%q)", h)
+		}
+		for _, c := range h {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+				t.Fatalf("non-hex hash %q", h)
+			}
+		}
+	})
 }

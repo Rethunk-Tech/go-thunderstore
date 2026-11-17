@@ -1,6 +1,7 @@
 package thunderstore
 
 import (
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -80,6 +81,32 @@ func FuzzParseLink(f *testing.F) {
 		got, err := ParseLink(again)
 		if err != nil || got != ref {
 			t.Fatalf("round-trip %+v from %q: %+v %v", ref, raw, got, err)
+		}
+	})
+}
+
+func FuzzOnHost(f *testing.F) {
+	for _, raw := range []string{
+		"https://b.example/live/repository/packages/Me-Mod-1.0.0.zip?x=1",
+		"javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd", "/relative/path",
+		"http://ccdn.thunderstore.io/x", "https://gcdn.thunderstore.io/a/b",
+		"", "https://", "https://user:pass@host/path",
+	} {
+		f.Add(raw, "https://ccdn.thunderstore.io")
+	}
+	f.Add("https://b.example/x.zip", "https://c.example")
+	f.Fuzz(func(t *testing.T, raw, base string) {
+		got, ok := OnHost(raw, base)
+		if !ok {
+			return
+		}
+		u, err := url.Parse(got)
+		b, berr := url.Parse(base)
+		if err != nil || berr != nil || u.Host == "" || u.Host != b.Host || u.Scheme != b.Scheme {
+			t.Fatalf("OnHost(%q, %q) = %q", raw, base, got)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			t.Fatalf("rewrote to non-http %q", got)
 		}
 	})
 }
