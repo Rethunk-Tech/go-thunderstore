@@ -78,6 +78,30 @@ func TestUploaderFollowsTheCLIProtocol(t *testing.T) {
 	}
 }
 
+func TestSubmitWithNoListedCommunityPageIsBlank(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"available_communities":[]}`))
+	}))
+	defer srv.Close()
+	page, err := NewUploader(srv.Client(), srv.URL, "tok").Submit(t.Context(), "12345678-1234-1234-1234-123456789012", "Ab", "lethal-company", nil)
+	if err != nil || page != "" {
+		t.Fatalf("submit = %q, %v, want no page and no error", page, err)
+	}
+}
+
+func TestSubmitReportsASiteError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	_, err := NewUploader(srv.Client(), srv.URL, "tok").Submit(t.Context(), "12345678-1234-1234-1234-123456789012", "Ab", "lethal-company", nil)
+	if err == nil {
+		t.Fatal("submit accepted a 400")
+	}
+}
+
 func TestSubmitRefusesANonHTTPPageURL(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +166,103 @@ func TestUploadAbortsWhenStorageIsSplitAcrossHosts(t *testing.T) {
 	_, err := NewUploader(srv.Client(), srv.URL, "tok").Upload(t.Context(), pkg)
 	if err == nil || !aborted {
 		t.Fatalf("err = %v, aborted = %v, want split storage refused and abort-upload", err, aborted)
+	}
+}
+
+func TestUploadNeedsAReadableZip(t *testing.T) {
+	t.Parallel()
+	_, err := NewUploader(http.DefaultClient, "http://127.0.0.1:1/", "tok").Upload(t.Context(), filepath.Join(t.TempDir(), "missing.zip"))
+	if err == nil {
+		t.Fatal("uploaded a zip that is not on disk")
+	}
+}
+
+func TestAnInitiateAnswerWithTooManyPartsIsRefused(t *testing.T) {
+	t.Parallel()
+	if err := checkParts(make([]uploadPart, maxUploadParts+1), 0); err == nil {
+		t.Fatal("accepted more parts than the cap")
+	}
+}
+
+func TestAPartAnswerWithoutAnETagIsRefused(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	_, err := NewUploader(srv.Client(), srv.URL, "tok").putPart(t.Context(), []byte("abc"), uploadPart{PartNumber: 1, Offset: 0, Length: 3, URL: srv.URL + "/part"})
+	if err == nil || !strings.Contains(err.Error(), "no ETag") {
+		t.Fatalf("err = %v, want a missing ETag refused", err)
+	}
+}
+
+func TestAPartStatusErrorNamesTheStatusWithoutABody(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	_, err := NewUploader(srv.Client(), srv.URL, "tok").putPart(t.Context(), []byte("abc"), uploadPart{PartNumber: 1, Offset: 0, Length: 3, URL: srv.URL + "/part"})
+	if err == nil || err.Error() != "uploading part 1: 400 Bad Request" {
+		t.Fatalf("err = %q, want the status and no body", err)
+	}
+}
+
+func TestCallReportsAnUnencodableBody(t *testing.T) {
+	t.Parallel()
+	err := NewUploader(http.DefaultClient, "http://example/", "tok").call(t.Context(), "p/", make(chan int), nil)
+	if err == nil {
+		t.Fatal("encoded a channel")
+	}
+}
+
+func TestAnUnresolvableUploadHostIsRefused(t *testing.T) {
+	t.Parallel()
+	up := NewUploader(nil, "https://thunderstore.io/", "")
+	err := up.checkResolvedHost(t.Context(), "no-such-host.invalid")
+	if err == nil || !strings.Contains(err.Error(), "not a public host") {
+		t.Fatalf("err = %v, want an unresolvable name refused", err)
+	}
+}
+
+func TestAStorageProxyErrorAbortsThePart(t *testing.T) {
+	t.Parallel()
+	hc := &http.Client{Transport: &http.Transport{Proxy: func(*http.Request) (*url.URL, error) {
+		return nil, fmt.Errorf("proxy down")
+	}}}
+	up := NewUploader(hc, "https://thunderstore.io/", "")
+	_, err := up.putPart(t.Context(), []byte("abc"), uploadPart{PartNumber: 1, Length: 3, URL: "https://8.8.8.8/part"})
+	if err == nil || !strings.Contains(err.Error(), "proxy down") {
+		t.Fatalf("err = %v, want the proxy error", err)
+	}
+}
+
+func TestUploaderFollowsAPartRedirectOnTheSameHost(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/part" {
+			http.Redirect(w, r, srv.URL+"/stored", http.StatusTemporaryRedirect)
+			return
+		}
+		if r.Method == http.MethodPut {
+			w.Header().Set("ETag", `"1"`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/initiate-upload/") {
+			_, _ = fmt.Fprintf(w, `{"user_media":{"uuid":"12345678-1234-1234-1234-123456789012"},"upload_urls":[{"part_number":1,"url":"%s/part","offset":0,"length":10}]}`, srv.URL)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/finish-upload/") {
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	pkg := filepath.Join(t.TempDir(), "a.zip")
+	if err := safefs.WriteFile(pkg, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	uuid, err := NewUploader(srv.Client(), srv.URL, "tok").Upload(t.Context(), pkg)
+	if err != nil || uuid != "12345678-1234-1234-1234-123456789012" {
+		t.Fatalf("upload = %q, %v", uuid, err)
 	}
 }
 
@@ -236,8 +357,15 @@ func TestUploaderChecksWhereTheSiteSendsTheZip(t *testing.T) {
 		{"short IP", nil, []uploadPart{part("https://127.1/a")}, false},
 		{"octal IP", nil, []uploadPart{part("https://0177.0.0.1/a")}, false},
 		{"hex-dotted IP", nil, []uploadPart{part("https://0x7f.0x0.0x0.0x1/a")}, false},
+		{"three-part IP", nil, []uploadPart{part("https://127.0.1/a")}, false},
 		{"hex IMDS", nil, []uploadPart{part("https://0xa9fea9fe/a")}, false},
 		{"fullwidth IP", nil, []uploadPart{part("https://１２７.０.０.１/a")}, false},
+		{"no host", nil, []uploadPart{part("https://")}, false},
+		{"empty URL", nil, []uploadPart{part("")}, false},
+		// Five dotted fields and a bare "0x" are names, not the IPv4 forms Unix aton accepts.
+		{"five-part name", nil, []uploadPart{part("https://1.2.3.4.5/a")}, true},
+		{"empty octet", nil, []uploadPart{part("https://127..0.1/a")}, true},
+		{"hex prefix only", nil, []uploadPart{part("https://0x/a")}, true},
 		{"ideographic digit IP", nil, []uploadPart{part("https://１２７.０.０.１:9000/a")}, false},
 		{"localhost", nil, []uploadPart{part("https://localhost/a")}, false},
 		{"localhost with port", nil, []uploadPart{part("https://localhost:9000/a")}, false},
@@ -261,6 +389,9 @@ func TestRefuseBlockedAddr(t *testing.T) {
 		ok   bool
 	}{
 		{"8.8.8.8:443", true},
+		{"8.8.8.8", true},
+		{"[fe80::1%eth0]:80", false},
+		{"not-an-ip:443", false},
 		{"127.0.0.1:443", false},
 		{"10.0.0.1:443", false},
 		{"192.168.1.1:443", false},

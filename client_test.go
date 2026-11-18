@@ -2,6 +2,7 @@ package thunderstore
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -174,6 +175,107 @@ func TestAGzipBombIsBoundedByMaxUnpacked(t *testing.T) {
 	err := c.streamPackages(t.Context(), srv.URL, func(*wirePackage) error { return nil })
 	if !errors.Is(err, safefs.ErrTooLarge) {
 		t.Fatalf("stream: %v", err)
+	}
+}
+
+func TestAChunkThatIsNotAPackageArrayIsRefused(t *testing.T) {
+	t.Parallel()
+	for name, body := range map[string][]byte{
+		"gzip magic only": {0x1f, 0x8b},
+		"not an array":    []byte(`{"packages":[]}`),
+		"unclosed array":  []byte("["),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+			defer srv.Close()
+			c, _ := New(Config{CacheDir: t.TempDir()})
+			if err := c.streamPackages(t.Context(), srv.URL, func(*wirePackage) error { return nil }); err == nil {
+				t.Fatal("accepted a chunk that is not a package array")
+			}
+		})
+	}
+	t.Run("not found", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+		c, _ := New(Config{CacheDir: t.TempDir()})
+		if err := c.streamPackages(t.Context(), srv.URL, func(*wirePackage) error { return nil }); err == nil {
+			t.Fatal("accepted a 404 chunk")
+		}
+	})
+	t.Run("callback error", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`[{"name":"M","owner":"A","versions":[{"version_number":"1.0.0"}]}]`))
+		}))
+		defer srv.Close()
+		c, _ := New(Config{CacheDir: t.TempDir()})
+		want := errors.New("stop")
+		if err := c.streamPackages(t.Context(), srv.URL, func(*wirePackage) error { return want }); !errors.Is(err, want) {
+			t.Fatalf("err = %v, want the callback error", err)
+		}
+	})
+	t.Run("index gzip magic", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte{0x1f, 0x8b, 0x00})
+		}))
+		defer srv.Close()
+		c, _ := New(Config{CacheDir: t.TempDir()})
+		if _, err := c.getJSON(t.Context(), srv.URL, new([]string)); err == nil {
+			t.Fatal("decoded an index with a gzip magic that is not gzip")
+		}
+	})
+}
+
+func TestAnIndexWithTooManyChunksIsRefused(t *testing.T) {
+	t.Parallel()
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		chunks := make([]string, maxChunks+1)
+		for i := range chunks {
+			chunks[i] = srv.URL + "/chunk/0"
+		}
+		_ = json.NewEncoder(w).Encode(chunks)
+	}))
+	defer srv.Close()
+	c, _ := New(Config{CacheDir: t.TempDir(), BaseURL: srv.URL})
+	if _, err := c.Index(t.Context(), community); err == nil {
+		t.Fatal("built an index of more than 500 chunks")
+	}
+}
+
+func TestSnapshotDoesNotServeACorruptListing(t *testing.T) {
+	f := newFake(t)
+	c := f.client(t, nil)
+	path, err := c.ListingFile(t.Context(), community)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("not-a-listing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Snapshot(t.Context(), community); err == nil {
+		t.Fatal("Snapshot served a corrupt listing")
+	}
+}
+
+func TestAListingGoneThenUnreachableIsAnError(t *testing.T) {
+	f := newFake(t)
+	c := f.client(t, nil)
+	if _, err := c.ListingFile(t.Context(), community); err != nil {
+		t.Fatal(err)
+	}
+	err := c.onListing(t.Context(), community, func(path string) error {
+		_ = os.RemoveAll(c.dir())
+		f.srv.Close()
+		return &fs.PathError{Op: "open", Path: path, Err: fs.ErrNotExist}
+	})
+	if err == nil {
+		t.Fatal("a vanished listing with the site down succeeded")
 	}
 }
 
@@ -449,6 +551,46 @@ func TestSnapshotAndEachPreferTheHeldListing(t *testing.T) {
 }
 
 const hash64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+func TestAChunkRedirectOnTheSameHostIsFollowed(t *testing.T) {
+	var base string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/chunk/0":
+			http.Redirect(w, r, base+"/chunk/real", http.StatusFound)
+		case "/chunk/real":
+			_, _ = w.Write(gz(t, []map[string]any{listing("Alice", "MoreCompany", "more players", 500, false, false)}))
+		default:
+			_, _ = w.Write(gz(t, []string{base + "/chunk/0"}))
+		}
+	}))
+	defer srv.Close()
+	base = srv.URL
+	c, _ := New(Config{CacheDir: t.TempDir(), BaseURL: base})
+	x, err := c.Index(t.Context(), community)
+	if err != nil || len(x.Packages()) != 1 {
+		t.Fatalf("Index = %v, %v", x, err)
+	}
+}
+
+func TestAChunkRedirectDoesNotDowngrade(t *testing.T) {
+	leaked := false
+	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }))
+	defer plain.Close()
+	var tls *httptest.Server
+	tls = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/chunk/") {
+			http.Redirect(w, r, plain.URL, http.StatusFound)
+			return
+		}
+		_, _ = w.Write(gz(t, []string{tls.URL + "/chunk/0"}))
+	}))
+	defer tls.Close()
+	c, _ := New(Config{CacheDir: t.TempDir(), BaseURL: tls.URL, HTTP: tls.Client()})
+	if _, err := c.Index(t.Context(), community); err == nil || leaked {
+		t.Fatalf("err = %v, request reached the plain-http server = %v", err, leaked)
+	}
+}
 
 func TestAChunkRedirectCannotLeaveTheTrustedHosts(t *testing.T) {
 	var elsewhere atomic.Int32
