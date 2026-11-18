@@ -16,6 +16,9 @@ if [ ! -x "$bin" ]; then
   curl -fsSL --max-time 60 --retry 5 --retry-all-errors -o "$tmp" "$URL"
   echo "$SHA256  $tmp" | sha256sum -c -
   tar -xzf "$tmp" -C "$cache" actionlint
+  # exec below replaces the shell, so the EXIT trap never runs.
+  rm -f "$tmp"
+  trap - EXIT
   chmod +x "$bin"
 fi
 exec "$bin" "$@"
