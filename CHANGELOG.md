@@ -6,6 +6,8 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-21
+
 ### Fixed
 
 - Upload: the target is checked on every request and behind a proxy, so a caller TLS dialer or wrapped transport cannot skip it; private hosts, disguised IPv4, non-ASCII and localhost hosts, and storage dials to private resolved IPs are refused.
@@ -91,7 +93,8 @@ Notable changes to `go-thunderstore`. The format follows
 - `CDNs`, `OnHost` and `CDNOrder` order Thunderstore's download hosts.
 - `ParseManifest` reads a package's `manifest.json`, BOM included.
 
-[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/Rethunk-Tech/go-thunderstore/compare/v0.3.1...v0.3.2
