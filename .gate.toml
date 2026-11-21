@@ -21,7 +21,7 @@ needs = ["tools"]
 # No-op in CI, like gitleaks: the pre-push hook already ran this gate on every pushed commit, and a runner's
 # download of the pinned binary fails the whole run whenever GitHub release downloads answer 504.
 [gates.workflows]
-run = '[ -n "$CI" ] || ./scripts/actionlint'
+run = '[ -n "$CI" ] || gate actions-allowed ./scripts/actionlint'
 
 # `gate` runs its detected `golangci-lint run`, which does not run formatters, so
 # an unformatted file passes the lint gate. This is that check, as a diff rather
