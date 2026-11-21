@@ -6,6 +6,16 @@ Notable changes to `go-thunderstore`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Upload: the target is checked on every request and behind a proxy, so a caller TLS dialer or wrapped transport cannot skip it; private hosts, disguised IPv4, non-ASCII and localhost hosts, and storage dials to private resolved IPs are refused.
+- Upload: storage and `Submit` page URLs must be http(s), 307 and 308 `PUT` hops off the storage host are refused, and the signed URL is dropped from part upload errors.
+- `OnHost` requires absolute http(s) URLs on both sides and drops userinfo when rewriting onto a host.
+- Install links refuse percent escapes, query and fragment, and listing names refuse path separators.
+- A gzip chunk with a truncated or wrong trailer fails, and an index with no packages is refused instead of replacing the listing.
+- `Built` runs outside the build lock and only when a listing is newly stored, old listings are dropped after the meta write, and `Stored` no longer serves a listing a refresh already replaced.
+- Unparseable version numbers sort last so the order is total, and `ParseDependency` errors truncate the input they echo.
+
 ## [0.4.1] - 2026-11-08
 
 ### Changed
