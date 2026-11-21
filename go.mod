@@ -11,10 +11,10 @@ tool (
 )
 
 require (
-	github.com/Rethunk-Tech/go-github v0.3.0
-	github.com/Rethunk-Tech/go-httpkit v0.3.1
-	github.com/Rethunk-Tech/go-safefs v0.9.1
-	github.com/Rethunk-Tech/go-semverish v0.3.0
+	github.com/Rethunk-Tech/go-github v0.3.1
+	github.com/Rethunk-Tech/go-httpkit v0.3.2
+	github.com/Rethunk-Tech/go-safefs v0.10.0
+	github.com/Rethunk-Tech/go-semverish v0.3.1
 )
 
 require (
@@ -39,7 +39,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/MirrexOne/unqueryvet v1.5.4 // indirect
 	github.com/OpenPeeDeeP/depguard/v2 v2.3.0 // indirect
-	github.com/Rethunk-Tech/go-desktopenv v0.9.2 // indirect
+	github.com/Rethunk-Tech/go-desktopenv v0.9.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/alecthomas/go-check-sumtype v0.5.1-0.20260828200218-ae6904d28606 // indirect
 	github.com/alexkohler/nakedret/v2 v2.0.6 // indirect
