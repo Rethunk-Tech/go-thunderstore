@@ -1,0 +1,35 @@
+name: Fuzz
+
+# The short per-target fuzz runs the CI gate does not repeat on every push.
+on:
+  schedule:
+    - cron: "4 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: Rethunk-Tech/gh-actions/setup-go@97aa05d5253c1a2b871079b1b271e20304e25270 # v1.33
+        with:
+          go-version-file: go.mod
+
+      # Each Fuzz target found in each package gets a short run, so a new target is covered without
+      # editing this file.
+      - name: Fuzz smoke
+        run: |
+          for pkg in $(go list ./...); do
+            for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
+              go test -run='^$' -fuzz="^${target}\$" -fuzztime=20s "$pkg"
+            done
+          done
