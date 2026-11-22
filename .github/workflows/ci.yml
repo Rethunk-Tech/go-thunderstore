@@ -32,6 +32,8 @@ jobs:
           go-version-file: go.mod
           run-govulncheck: "true"
           run-gorelease: "true"
+          # The gate job is the only Linux test run, so it carries the race detector.
+          run-test-race: "true"
 
       # Without this cache every pass re-checks every package. The key takes only the inputs
       # that touch every package, and the prefix restore-key keeps a changed key from starting cold.
